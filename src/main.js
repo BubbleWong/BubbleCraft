@@ -32,6 +32,8 @@ world.generate(2);
 const spawn = world.getSpawnPoint();
 controls.getObject().position.copy(spawn);
 controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
+const MAX_STEP_HEIGHT = 1.01;
+let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
 
 overlay.addEventListener('click', () => controls.lock());
 controls.addEventListener('lock', () => overlay.classList.add('hidden'));
@@ -147,17 +149,40 @@ function updatePhysics(delta) {
   if (direction.z !== 0) velocity.z -= direction.z * accel * delta;
   if (direction.x !== 0) velocity.x -= direction.x * accel * delta;
 
+  const object = controls.getObject();
+  const prevX = object.position.x;
+  const prevZ = object.position.z;
+
   controls.moveRight(-velocity.x * delta);
   controls.moveForward(-velocity.z * delta);
 
-  const object = controls.getObject();
+  const feetBefore = object.position.y - playerHeight;
+  const groundBefore = currentGroundHeight;
+  const groundedBefore = feetBefore - groundBefore <= 0.1;
+  const surfaceAhead = world.getSurfaceHeightAt(object.position.x, object.position.z, object.position.y);
+  if (groundedBefore && surfaceAhead > groundBefore + MAX_STEP_HEIGHT) {
+    object.position.x = prevX;
+    object.position.z = prevZ;
+    velocity.x = 0;
+    velocity.z = 0;
+  }
+
   object.position.y += velocity.y * delta;
 
-  const ground = world.getHeightAt(Math.floor(object.position.x), Math.floor(object.position.z)) + playerHeight;
-  if (object.position.y < ground) {
-    velocity.y = 0;
-    object.position.y = ground;
+  const footY = object.position.y - playerHeight;
+  const surface = world.getSurfaceHeightAt(object.position.x, object.position.z, footY + 0.1);
+  const distanceToGround = footY - surface;
+  const grounded = distanceToGround <= 0.1;
+
+  if (grounded) {
+    if (distanceToGround < 0) {
+      object.position.y = surface + playerHeight;
+    }
+    if (velocity.y < 0) velocity.y = 0;
     canJump = true;
+    currentGroundHeight = surface;
+  } else {
+    canJump = false;
   }
 }
 

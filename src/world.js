@@ -286,6 +286,25 @@ export class World {
     return 0;
   }
 
+  getSurfaceHeightAt(x, z, maxY = CHUNK_HEIGHT - 1) {
+    const blockX = Math.floor(x);
+    const blockZ = Math.floor(z);
+    const cx = Math.floor(blockX / CHUNK_SIZE);
+    const cz = Math.floor(blockZ / CHUNK_SIZE);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return 0;
+    const lx = blockX - cx * CHUNK_SIZE;
+    const lz = blockZ - cz * CHUNK_SIZE;
+    let top = Math.min(Math.floor(maxY), CHUNK_HEIGHT - 1);
+    if (Number.isNaN(top)) top = CHUNK_HEIGHT - 1;
+    for (let y = top; y >= 0; y -= 1) {
+      if (chunk.get(lx, y, lz) !== BLOCK_TYPES.air) {
+        return y + 1;
+      }
+    }
+    return 0;
+  }
+
   getSpawnPoint() {
     const x = 0;
     const z = 0;

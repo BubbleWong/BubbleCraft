@@ -34,6 +34,9 @@ controls.getObject().position.copy(spawn);
 controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
 const MAX_STEP_HEIGHT = 1.01;
 let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
+let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+let wasGroundedPrevious = true;
+let takeoffGroundHeight = currentGroundHeight;
 
 overlay.addEventListener('click', () => controls.lock());
 controls.addEventListener('lock', () => overlay.classList.add('hidden'));
@@ -54,6 +57,7 @@ const gravity = 40;
 const walkAcceleration = 140;
 const sprintMultiplier = 1.75;
 const jumpImpulse = 15;
+const MAX_JUMP_CLEARANCE = 0.6;
 
 function setMovementState(code, pressed) {
   switch (code) {
@@ -139,7 +143,7 @@ function updatePhysics(delta) {
   const object = controls.getObject();
   const previousPosition = object.position.clone();
   const previousGround = currentGroundHeight;
-  const wasGrounded = (object.position.y - playerHeight - currentGroundHeight) <= 0.1;
+  const wasGroundedPrevFrame = wasGroundedPrevious;
 
   velocity.x -= velocity.x * 10 * delta;
   velocity.z -= velocity.z * 10 * delta;
@@ -161,10 +165,9 @@ function updatePhysics(delta) {
   controls.moveForward(-velocity.z * delta);
 
   const feetBefore = object.position.y - playerHeight;
-  const groundBefore = currentGroundHeight;
-  const groundedBefore = feetBefore - groundBefore <= 0.1;
+  const groundedBefore = Math.abs(feetBefore - currentGroundHeight) <= 0.1;
   const surfaceAhead = world.getSurfaceHeightAt(object.position.x, object.position.z, object.position.y);
-  if (groundedBefore && surfaceAhead > groundBefore + MAX_STEP_HEIGHT) {
+  if (groundedBefore && surfaceAhead > currentGroundHeight + MAX_STEP_HEIGHT) {
     object.position.x = prevX;
     object.position.z = prevZ;
     velocity.x = 0;
@@ -173,18 +176,33 @@ function updatePhysics(delta) {
 
   object.position.y += velocity.y * delta;
 
+  const maxAllowedFoot = takeoffGroundHeight + MAX_STEP_HEIGHT + MAX_JUMP_CLEARANCE;
+  const currentFoot = object.position.y - playerHeight;
+  if (currentFoot > maxAllowedFoot) {
+    object.position.y = maxAllowedFoot + playerHeight;
+    if (velocity.y > 0) velocity.y = 0;
+  }
+
   const footY = object.position.y - playerHeight;
   const surface = world.getSurfaceHeightAt(object.position.x, object.position.z, footY + 0.1);
   const distanceToGround = footY - surface;
   const grounded = distanceToGround <= 0.1;
 
-  if (grounded && surface > previousGround + MAX_STEP_HEIGHT) {
+  if (wasGroundedPrevFrame && !grounded) {
+    takeoffGroundHeight = currentGroundHeight;
+    maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+  }
+
+  if (grounded && surface > maxClimbHeight) {
     object.position.copy(previousPosition);
     velocity.x = 0;
     velocity.z = 0;
     if (velocity.y > 0) velocity.y = 0;
     currentGroundHeight = previousGround;
-    canJump = wasGrounded;
+    takeoffGroundHeight = previousGround;
+    maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    wasGroundedPrevious = wasGroundedPrevFrame;
+    canJump = wasGroundedPrevFrame;
     return;
   }
 
@@ -195,9 +213,13 @@ function updatePhysics(delta) {
     if (velocity.y < 0) velocity.y = 0;
     canJump = true;
     currentGroundHeight = surface;
+    takeoffGroundHeight = surface;
+    maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
   } else {
     canJump = false;
   }
+
+  wasGroundedPrevious = grounded;
 }
 
 function animate() {

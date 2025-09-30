@@ -33,6 +33,11 @@ const spawn = world.getSpawnPoint();
 controls.getObject().position.copy(spawn);
 controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
 const MAX_STEP_HEIGHT = 1.01;
+const MAX_JUMP_CLEARANCE = 0.1;
+const PLAYER_RADIUS = 0.35;
+const FOOT_BUFFER = 0.05;
+const HEAD_BUFFER = 0.1;
+
 let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
 let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
 let wasGroundedPrevious = true;
@@ -57,7 +62,18 @@ const gravity = 40;
 const walkAcceleration = 140;
 const sprintMultiplier = 1.75;
 const jumpImpulse = 15;
-const MAX_JUMP_CLEARANCE = 0.6;
+
+const SAMPLE_OFFSETS = [
+  [0, 0],
+  [PLAYER_RADIUS, 0],
+  [-PLAYER_RADIUS, 0],
+  [0, PLAYER_RADIUS],
+  [0, -PLAYER_RADIUS],
+  [PLAYER_RADIUS * 0.707, PLAYER_RADIUS * 0.707],
+  [PLAYER_RADIUS * 0.707, -PLAYER_RADIUS * 0.707],
+  [-PLAYER_RADIUS * 0.707, PLAYER_RADIUS * 0.707],
+  [-PLAYER_RADIUS * 0.707, -PLAYER_RADIUS * 0.707],
+];
 
 function setMovementState(code, pressed) {
   switch (code) {
@@ -137,6 +153,35 @@ document.addEventListener('contextmenu', (event) => {
 const clock = new THREE.Clock();
 let hudAccumulator = 0;
 
+function highestGroundUnder(position, maxY = position.y) {
+  let highest = -Infinity;
+  for (const [ox, oz] of SAMPLE_OFFSETS) {
+    const height = world.getSurfaceHeightAt(position.x + ox, position.z + oz, maxY);
+    if (height > highest) highest = height;
+  }
+  return highest;
+}
+
+function collidesAt(position) {
+  const minY = position.y - playerHeight + FOOT_BUFFER;
+  const maxY = position.y - HEAD_BUFFER;
+  const minBlockY = Math.floor(minY);
+  const maxBlockY = Math.floor(maxY);
+
+  for (const [ox, oz] of SAMPLE_OFFSETS) {
+    const px = position.x + ox;
+    const pz = position.z + oz;
+    const blockX = Math.floor(px);
+    const blockZ = Math.floor(pz);
+    for (let by = minBlockY; by <= maxBlockY; by += 1) {
+      if (world.getBlock(blockX, by, blockZ) !== BLOCK_TYPES.air) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function updatePhysics(delta) {
   if (!controls.isLocked) return;
 
@@ -164,9 +209,16 @@ function updatePhysics(delta) {
   controls.moveRight(-velocity.x * delta);
   controls.moveForward(-velocity.z * delta);
 
+  if (collidesAt(object.position)) {
+    object.position.x = prevX;
+    object.position.z = prevZ;
+    velocity.x = 0;
+    velocity.z = 0;
+  }
+
   const feetBefore = object.position.y - playerHeight;
   const groundedBefore = Math.abs(feetBefore - currentGroundHeight) <= 0.1;
-  const surfaceAhead = world.getSurfaceHeightAt(object.position.x, object.position.z, object.position.y);
+  const surfaceAhead = highestGroundUnder(object.position, object.position.y);
   if (groundedBefore && surfaceAhead > currentGroundHeight + MAX_STEP_HEIGHT) {
     object.position.x = prevX;
     object.position.z = prevZ;
@@ -184,7 +236,8 @@ function updatePhysics(delta) {
   }
 
   const footY = object.position.y - playerHeight;
-  const surface = world.getSurfaceHeightAt(object.position.x, object.position.z, footY + 0.1);
+  let surface = highestGroundUnder(object.position, footY + 0.1);
+  if (!Number.isFinite(surface)) surface = -Infinity;
   const distanceToGround = footY - surface;
   const grounded = distanceToGround <= 0.1;
 
@@ -194,6 +247,19 @@ function updatePhysics(delta) {
   }
 
   if (grounded && surface > maxClimbHeight) {
+    object.position.copy(previousPosition);
+    velocity.x = 0;
+    velocity.z = 0;
+    if (velocity.y > 0) velocity.y = 0;
+    currentGroundHeight = previousGround;
+    takeoffGroundHeight = previousGround;
+    maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    wasGroundedPrevious = wasGroundedPrevFrame;
+    canJump = wasGroundedPrevFrame;
+    return;
+  }
+
+  if (collidesAt(object.position)) {
     object.position.copy(previousPosition);
     velocity.x = 0;
     velocity.z = 0;

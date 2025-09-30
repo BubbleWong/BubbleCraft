@@ -16,6 +16,23 @@ canvas#game {
   height: 100vh;
 }
 
+.hud {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.6);
+  color: #f0f0f0;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+  min-width: 12rem;
+}
+
 .overlay {
   position: fixed;
   inset: 0;

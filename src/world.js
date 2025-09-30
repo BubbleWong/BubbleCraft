@@ -11,6 +11,15 @@ const BLOCK_TYPES = {
   sand: 4,
 };
 
+const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
+
+const BLOCK_TYPE_LABELS = {
+  [BLOCK_TYPES.grass]: 'Grass',
+  [BLOCK_TYPES.dirt]: 'Dirt',
+  [BLOCK_TYPES.stone]: 'Stone',
+  [BLOCK_TYPES.sand]: 'Sand',
+};
+
 const BLOCK_COLORS = {
   [BLOCK_TYPES.grass]: [0.49, 0.74, 0.35],
   [BLOCK_TYPES.dirt]: [0.58, 0.41, 0.29],
@@ -39,6 +48,7 @@ class Chunk {
     this.origin = new THREE.Vector3(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.mesh = null;
+    this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
   }
 
@@ -58,7 +68,14 @@ class Chunk {
   }
 
   set(x, y, z, type) {
-    this.blocks[this.index(x, y, z)] = type;
+    const idx = this.index(x, y, z);
+    const prev = this.blocks[idx];
+    if (prev === type) return false;
+
+    this.blocks[idx] = type;
+    if (this.counts[prev] > 0) this.counts[prev] -= 1;
+    this.counts[type] += 1;
+    return true;
   }
 
   generate() {
@@ -174,6 +191,7 @@ export class World {
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.noise = new ImprovedNoise();
     this.seed = Math.random() * 1000;
+    this.blockTotals = new Uint32Array(MAX_BLOCK_TYPE + 1);
   }
 
   getChunk(cx, cz) {
@@ -185,6 +203,7 @@ export class World {
     if (!chunk) {
       chunk = new Chunk(this, cx, cz);
       this.chunks.set(chunkKey(cx, cz), chunk);
+      this.applyChunkCounts(chunk, 1);
       chunk.rebuild();
     }
     return chunk;
@@ -212,6 +231,12 @@ export class World {
     if (current === type) return false;
 
     chunk.set(lx, y, lz, type);
+    if (current <= MAX_BLOCK_TYPE && this.blockTotals[current] > 0) {
+      this.blockTotals[current] -= 1;
+    }
+    if (type <= MAX_BLOCK_TYPE) {
+      this.blockTotals[type] += 1;
+    }
     chunk.rebuild();
 
     if (lx === 0) this.rebuildChunkIfExists(cx - 1, cz);
@@ -232,6 +257,18 @@ export class World {
         this.ensureChunk(cx, cz);
       }
     }
+  }
+
+  applyChunkCounts(chunk, delta) {
+    const counts = chunk.counts;
+    for (let i = 0; i < counts.length; i += 1) {
+      const next = this.blockTotals[i] + delta * counts[i];
+      this.blockTotals[i] = next < 0 ? 0 : next;
+    }
+  }
+
+  getBlockTotals() {
+    return this.blockTotals;
   }
 
   getHeightAt(x, z) {
@@ -273,3 +310,4 @@ export class World {
 }
 
 export { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES };
+export { BLOCK_TYPE_LABELS };

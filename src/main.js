@@ -1,9 +1,10 @@
 import * as THREE from './vendor/three.module.js';
 import { PointerLockControls } from './vendor/PointerLockControls.js';
-import { World, BLOCK_TYPES, CHUNK_HEIGHT } from './world.js';
+import { World, BLOCK_TYPES, CHUNK_HEIGHT, BLOCK_TYPE_LABELS } from './world.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
+const hud = document.getElementById('hud');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -128,6 +129,7 @@ document.addEventListener('contextmenu', (event) => {
 });
 
 const clock = new THREE.Clock();
+let hudAccumulator = 0;
 
 function updatePhysics(delta) {
   if (!controls.isLocked) return;
@@ -162,14 +164,40 @@ function updatePhysics(delta) {
 function animate() {
   const delta = Math.min(0.05, clock.getDelta());
   updatePhysics(delta);
+  hudAccumulator += delta;
+  if (hudAccumulator >= 0.2) {
+    updateHUD();
+    hudAccumulator = 0;
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
 
 animate();
+updateHUD();
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+function updateHUD() {
+  if (!hud) return;
+  const pos = controls.getObject().position;
+  const lines = [`XYZ: ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`];
+  const totals = world.getBlockTotals();
+  let typeCount = 0;
+  const blockLines = [];
+  for (const [typeKey, label] of Object.entries(BLOCK_TYPE_LABELS)) {
+    const typeIndex = Number(typeKey);
+    const amount = totals[typeIndex] ?? 0;
+    if (amount > 0) {
+      typeCount += 1;
+      blockLines.push(`${label}: ${amount}`);
+    }
+  }
+  lines.push(`Types: ${typeCount}`);
+  lines.push(...blockLines);
+  hud.innerHTML = lines.map((text) => `<div>${text}</div>`).join('');
+}

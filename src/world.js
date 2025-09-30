@@ -19,12 +19,12 @@ const BLOCK_COLORS = {
 };
 
 const FACE_DEFS = [
-  { dir: [1, 0, 0], corners: [[1, 1, 0], [1, 0, 0], [1, 0, 1], [1, 1, 1]] }, // +X
-  { dir: [-1, 0, 0], corners: [[0, 1, 1], [0, 0, 1], [0, 0, 0], [0, 1, 0]] }, // -X
-  { dir: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] }, // +Y
-  { dir: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] }, // -Y
-  { dir: [0, 0, 1], corners: [[0, 1, 1], [0, 0, 1], [1, 0, 1], [1, 1, 1]] }, // +Z
-  { dir: [0, 0, -1], corners: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]] }, // -Z
+  { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
+  { dir: [-1, 0, 0], shade: 0.8, corners: [[0, 1, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]] }, // -X
+  { dir: [0, 1, 0], shade: 1.0, corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] }, // +Y
+  { dir: [0, -1, 0], shade: 0.6, corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] }, // -Y
+  { dir: [0, 0, 1], shade: 0.9, corners: [[0, 1, 1], [0, 0, 1], [1, 0, 1], [1, 1, 1]] }, // +Z
+  { dir: [0, 0, -1], shade: 0.7, corners: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]] }, // -Z
 ];
 
 const TRIANGLE_INDICES = [0, 1, 2, 0, 2, 3];
@@ -120,12 +120,13 @@ class Chunk {
             const neighborType = this.world.getBlock(worldX + face.dir[0], worldY + face.dir[1], worldZ + face.dir[2]);
             if (neighborType !== BLOCK_TYPES.air) continue;
 
+            const shade = face.shade ?? 1;
             for (let i = 0; i < TRIANGLE_INDICES.length; i += 1) {
               const cornerIndex = TRIANGLE_INDICES[i];
               const corner = face.corners[cornerIndex];
               positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
               normals.push(face.dir[0], face.dir[1], face.dir[2]);
-              colors.push(color[0], color[1], color[2]);
+              colors.push(color[0] * shade, color[1] * shade, color[2] * shade);
             }
           }
         }

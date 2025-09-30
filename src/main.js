@@ -136,6 +136,11 @@ let hudAccumulator = 0;
 function updatePhysics(delta) {
   if (!controls.isLocked) return;
 
+  const object = controls.getObject();
+  const previousPosition = object.position.clone();
+  const previousGround = currentGroundHeight;
+  const wasGrounded = (object.position.y - playerHeight - currentGroundHeight) <= 0.1;
+
   velocity.x -= velocity.x * 10 * delta;
   velocity.z -= velocity.z * 10 * delta;
   velocity.y -= gravity * delta;
@@ -149,7 +154,6 @@ function updatePhysics(delta) {
   if (direction.z !== 0) velocity.z -= direction.z * accel * delta;
   if (direction.x !== 0) velocity.x -= direction.x * accel * delta;
 
-  const object = controls.getObject();
   const prevX = object.position.x;
   const prevZ = object.position.z;
 
@@ -173,6 +177,16 @@ function updatePhysics(delta) {
   const surface = world.getSurfaceHeightAt(object.position.x, object.position.z, footY + 0.1);
   const distanceToGround = footY - surface;
   const grounded = distanceToGround <= 0.1;
+
+  if (grounded && surface > previousGround + MAX_STEP_HEIGHT) {
+    object.position.copy(previousPosition);
+    velocity.x = 0;
+    velocity.z = 0;
+    if (velocity.y > 0) velocity.y = 0;
+    currentGroundHeight = previousGround;
+    canJump = wasGrounded;
+    return;
+  }
 
   if (grounded) {
     if (distanceToGround < 0) {

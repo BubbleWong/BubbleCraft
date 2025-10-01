@@ -38,13 +38,10 @@ const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
 
-const DEBUG_PHYSICS = true;
+const DEBUG_PHYSICS = false;
 
 const vecToString = (v) => `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
-const debugLog = (...args) => {
-  if (!DEBUG_PHYSICS) return;
-  console.log('[physics]', ...args);
-};
+const debugLog = () => {};
 
 let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
 let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
@@ -198,16 +195,11 @@ function collidesAt(position) {
 function resolvePenetration(position, velocity) {
   if (!collidesAt(position)) return;
 
-  debugLog('penetration detected (pre-step)', { pos: vecToString(position), vel: vecToString(velocity) });
-
   let attempts = 0;
   while (collidesAt(position) && attempts < 12) {
     position.y += 0.05;
     if (velocity.y < 0) velocity.y = 0;
     attempts += 1;
-  }
-  if (attempts > 0) {
-    debugLog('lifted vertically to resolve collision', { attempts, pos: vecToString(position) });
   }
 
   if (collidesAt(position)) {
@@ -215,7 +207,6 @@ function resolvePenetration(position, velocity) {
       position.x += ox * 0.1;
       position.z += oz * 0.1;
       if (!collidesAt(position)) {
-        debugLog('horizontal nudge resolved collision', { offset: [ox.toFixed(2), oz.toFixed(2)], pos: vecToString(position) });
         break;
       }
       position.x -= ox * 0.1;
@@ -228,14 +219,12 @@ function resolvePenetration(position, velocity) {
     if (Number.isFinite(ground)) {
       position.y = ground + playerHeight + FOOT_BUFFER;
       if (velocity.y < 0) velocity.y = 0;
-      debugLog('snapped to ground while resolving collision', { ground: ground.toFixed(2), pos: vecToString(position) });
     }
   }
 
   if (collidesAt(position)) {
     position.copy(lastSafePosition);
     velocity.set(0, 0, 0);
-    debugLog('reverted to last safe position', { pos: vecToString(position) });
   }
 }
 
@@ -297,11 +286,6 @@ function updatePhysics(delta) {
     currentGroundHeight + MAX_STEP_HEIGHT + 0.1
   );
   if (groundedBefore && surfaceAhead > currentGroundHeight + MAX_STEP_HEIGHT) {
-    debugLog('step prevented', {
-      surfaceAhead: surfaceAhead.toFixed(2),
-      ground: currentGroundHeight.toFixed(2),
-      pos: vecToString(object.position),
-    });
     object.position.x = prevX;
     object.position.z = prevZ;
     velocity.x = 0;
@@ -315,10 +299,6 @@ function updatePhysics(delta) {
   if (currentFoot > maxAllowedFoot) {
     object.position.y = maxAllowedFoot + playerHeight;
     if (velocity.y > 0) velocity.y = 0;
-    debugLog('jump height clamped', {
-      maxAllowedFoot: maxAllowedFoot.toFixed(2),
-      pos: vecToString(object.position),
-    });
   }
 
   const footY = object.position.y - playerHeight;
@@ -333,11 +313,6 @@ function updatePhysics(delta) {
   }
 
   if (grounded && surface > maxClimbHeight) {
-    debugLog('prevented landing above limit', {
-      surface: surface.toFixed(2),
-      maxClimbHeight: maxClimbHeight.toFixed(2),
-      pos: vecToString(object.position),
-    });
     object.position.copy(previousPosition);
     velocity.x = 0;
     velocity.z = 0;
@@ -351,10 +326,6 @@ function updatePhysics(delta) {
   }
 
   if (collidesAt(object.position)) {
-    debugLog('post-step collision, reverting', {
-      pos: vecToString(object.position),
-      previous: vecToString(previousPosition),
-    });
     object.position.x = previousPosition.x;
     object.position.z = previousPosition.z;
     velocity.x = 0;
@@ -381,11 +352,6 @@ function updatePhysics(delta) {
     currentGroundHeight = surface;
     takeoffGroundHeight = surface;
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
-    debugLog('grounded', {
-      ground: surface.toFixed(2),
-      pos: vecToString(object.position),
-      velocityY: velocity.y.toFixed(3),
-    });
   } else {
     canJump = false;
   }
@@ -395,7 +361,6 @@ function updatePhysics(delta) {
 
   if (!collidesAt(object.position)) {
     lastSafePosition.copy(object.position);
-    debugLog('updated last safe position', { pos: vecToString(lastSafePosition) });
   }
 }
 

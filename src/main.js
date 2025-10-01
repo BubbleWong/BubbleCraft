@@ -165,8 +165,12 @@ function highestGroundUnder(position, maxY = position.y) {
 function collidesAt(position) {
   const minY = position.y - playerHeight + FOOT_BUFFER;
   const maxY = position.y - HEAD_BUFFER;
-  const minBlockY = Math.floor(minY);
-  const maxBlockY = Math.floor(maxY);
+  const minBlockY = Math.max(0, Math.floor(minY));
+  const maxBlockY = Math.min(CHUNK_HEIGHT - 1, Math.floor(maxY));
+
+  if (maxBlockY < minBlockY) {
+    return false;
+  }
 
   for (const [ox, oz] of SAMPLE_OFFSETS) {
     const px = position.x + ox;
@@ -182,10 +186,50 @@ function collidesAt(position) {
   return false;
 }
 
+function resolvePenetration(position, velocity) {
+  if (!collidesAt(position)) return;
+
+  for (let i = 0; i < 8 && collidesAt(position); i += 1) {
+    position.y += 0.1;
+  }
+
+  if (collidesAt(position)) {
+    const ground = highestGroundUnder(position, position.y);
+    if (Number.isFinite(ground)) {
+      position.y = ground + playerHeight + FOOT_BUFFER;
+    }
+  }
+
+  if (collidesAt(position)) {
+    for (const [ox, oz] of SAMPLE_OFFSETS) {
+      position.x += ox * 0.25;
+      position.z += oz * 0.25;
+      if (!collidesAt(position)) break;
+    }
+  }
+
+  if (collidesAt(position)) {
+    position.x = Math.round(position.x) + 0.5;
+    position.z = Math.round(position.z) + 0.5;
+  }
+
+  if (collidesAt(position)) {
+    const ground = highestGroundUnder(position, position.y);
+    if (Number.isFinite(ground)) {
+      position.y = ground + playerHeight + FOOT_BUFFER;
+    }
+  }
+
+  if (collidesAt(position)) {
+    velocity.set(0, 0, 0);
+  }
+}
+
 function updatePhysics(delta) {
   if (!controls.isLocked) return;
 
   const object = controls.getObject();
+  resolvePenetration(object.position, velocity);
   const previousPosition = object.position.clone();
   const previousGround = currentGroundHeight;
   const wasGroundedPrevFrame = wasGroundedPrevious;
@@ -209,11 +253,26 @@ function updatePhysics(delta) {
   controls.moveRight(-velocity.x * delta);
   controls.moveForward(-velocity.z * delta);
 
-  if (collidesAt(object.position)) {
-    object.position.x = prevX;
-    object.position.z = prevZ;
-    velocity.x = 0;
-    velocity.z = 0;
+  const movedX = object.position.x - prevX;
+  const movedZ = object.position.z - prevZ;
+
+  object.position.x = prevX;
+  object.position.z = prevZ;
+
+  if (movedX !== 0) {
+    object.position.x += movedX;
+    if (collidesAt(object.position)) {
+      object.position.x = prevX;
+      velocity.x = 0;
+    }
+  }
+
+  if (movedZ !== 0) {
+    object.position.z += movedZ;
+    if (collidesAt(object.position)) {
+      object.position.z = prevZ;
+      velocity.z = 0;
+    }
   }
 
   const feetBefore = object.position.y - playerHeight;

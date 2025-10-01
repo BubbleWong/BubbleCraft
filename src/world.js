@@ -9,6 +9,11 @@ const BLOCK_TYPES = {
   dirt: 2,
   stone: 3,
   sand: 4,
+  wood: 5,
+  leaves: 6,
+  crystal: 7,
+  flowerRed: 8,
+  flowerYellow: 9,
 };
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -18,6 +23,11 @@ const BLOCK_TYPE_LABELS = {
   [BLOCK_TYPES.dirt]: 'Dirt',
   [BLOCK_TYPES.stone]: 'Stone',
   [BLOCK_TYPES.sand]: 'Sand',
+  [BLOCK_TYPES.wood]: 'Wood',
+  [BLOCK_TYPES.leaves]: 'Leaves',
+  [BLOCK_TYPES.crystal]: 'Crystal',
+  [BLOCK_TYPES.flowerRed]: 'Flower (Red)',
+  [BLOCK_TYPES.flowerYellow]: 'Flower (Yellow)',
 };
 
 const BLOCK_COLORS = {
@@ -25,6 +35,11 @@ const BLOCK_COLORS = {
   [BLOCK_TYPES.dirt]: [0.58, 0.41, 0.29],
   [BLOCK_TYPES.stone]: [0.65, 0.65, 0.7],
   [BLOCK_TYPES.sand]: [0.93, 0.87, 0.63],
+  [BLOCK_TYPES.wood]: [0.54, 0.35, 0.19],
+  [BLOCK_TYPES.leaves]: [0.29, 0.62, 0.28],
+  [BLOCK_TYPES.crystal]: [0.62, 0.82, 0.97],
+  [BLOCK_TYPES.flowerRed]: [0.86, 0.23, 0.27],
+  [BLOCK_TYPES.flowerYellow]: [0.96, 0.88, 0.33],
 };
 
 const FACE_DEFS = [
@@ -108,8 +123,118 @@ class Chunk {
             blockType = terrainHeight <= 18 ? BLOCK_TYPES.sand : BLOCK_TYPES.grass;
           } else if (terrainHeight - y <= 3) {
             blockType = BLOCK_TYPES.dirt;
+          } else if (blockType === BLOCK_TYPES.stone && y > 6 && y < terrainHeight - 4) {
+            const crystalChance = this.world.random3D(worldX, y, worldZ, 79);
+            if (crystalChance > 0.93) {
+              blockType = BLOCK_TYPES.crystal;
+            }
           }
           this.set(lx, y, lz, blockType);
+        }
+
+        const surfaceType = this.get(lx, terrainHeight, lz);
+        if (surfaceType === BLOCK_TYPES.grass) {
+          const treeChance = this.world.random2D(worldX, worldZ, 37);
+          const treeHeight = 4 + Math.floor(this.world.random2D(worldX, worldZ, 53) * 3);
+          if (
+            treeChance > 0.82 &&
+            terrainHeight + treeHeight + 2 < CHUNK_HEIGHT &&
+            this.canPlaceTree(lx, terrainHeight, lz, treeHeight)
+          ) {
+            this.placeTree(lx, terrainHeight, lz, treeHeight, worldX, worldZ);
+          } else if (terrainHeight + 1 < CHUNK_HEIGHT) {
+            const flowerChance = this.world.random2D(worldX, worldZ, 91);
+            if (flowerChance > 0.7) {
+              const flowerType = flowerChance > 0.88 ? BLOCK_TYPES.flowerRed : BLOCK_TYPES.flowerYellow;
+              this.set(lx, terrainHeight + 1, lz, flowerType);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  canPlaceTree(lx, groundY, lz, height, radius = 2) {
+    if (
+      lx < radius ||
+      lx >= CHUNK_SIZE - radius ||
+      lz < radius ||
+      lz >= CHUNK_SIZE - radius ||
+      groundY + height + 2 >= CHUNK_HEIGHT
+    ) {
+      return false;
+    }
+
+    for (let y = groundY + 1; y <= groundY + height + 2; y += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        for (let dz = -radius; dz <= radius; dz += 1) {
+          const check = this.get(lx + dx, y, lz + dz);
+          if (check !== BLOCK_TYPES.air) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  placeTree(lx, groundY, lz, height, worldX, worldZ) {
+    for (let i = 1; i <= height; i += 1) {
+      this.set(lx, groundY + i, lz, BLOCK_TYPES.wood);
+    }
+
+    const canopyTop = groundY + height + 2;
+    for (let y = groundY + height - 1; y <= canopyTop; y += 1) {
+      const layerRadius = Math.max(1, canopyTop - y);
+      for (let dx = -layerRadius; dx <= layerRadius; dx += 1) {
+        for (let dz = -layerRadius; dz <= layerRadius; dz += 1) {
+          const dist = Math.abs(dx) + Math.abs(dz);
+          if (dist > layerRadius + 1) continue;
+          const targetX = lx + dx;
+          const targetY = y;
+          const targetZ = lz + dz;
+          if (
+            targetX < 0 ||
+            targetX >= CHUNK_SIZE ||
+            targetZ < 0 ||
+            targetZ >= CHUNK_SIZE ||
+            targetY >= CHUNK_HEIGHT
+          ) {
+            continue;
+          }
+          if (dx === 0 && dz === 0 && targetY <= groundY + height) continue;
+          if (this.get(targetX, targetY, targetZ) === BLOCK_TYPES.air) {
+            const leafNoise = this.world.random3D(worldX + dx, targetY, worldZ + dz, 113);
+            if (leafNoise > 0.2) {
+              this.set(targetX, targetY, targetZ, BLOCK_TYPES.leaves);
+            }
+          }
+        }
+      }
+    }
+
+    const offsets = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    for (const [dx, dz] of offsets) {
+      const fx = lx + dx;
+      const fz = lz + dz;
+      const flowerY = groundY + 1;
+      if (
+        fx < 0 ||
+        fx >= CHUNK_SIZE ||
+        fz < 0 ||
+        fz >= CHUNK_SIZE ||
+        flowerY >= CHUNK_HEIGHT
+      ) {
+        continue;
+      }
+      if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && this.get(fx, flowerY, fz) === BLOCK_TYPES.air) {
+        const chance = this.world.random2D(worldX + dx * 3, worldZ + dz * 3, 127);
+        if (chance > 0.65) {
+          const flowerType = chance > 0.85 ? BLOCK_TYPES.flowerRed : BLOCK_TYPES.flowerYellow;
+          this.set(fx, flowerY, fz, flowerType);
         }
       }
     }
@@ -190,8 +315,21 @@ export class World {
     this.chunkMeshes = new Set();
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.noise = new ImprovedNoise();
-    this.seed = Math.random() * 1000;
+    this.seed = Math.floor(Math.random() * 2 ** 31);
     this.blockTotals = new Uint32Array(MAX_BLOCK_TYPE + 1);
+  }
+
+  pseudoRandom(x, y, z, salt = 0) {
+    const s = Math.sin((x * 15731 + y * 789221 + z * 1376312589 + (this.seed + salt) * 0.0001) * 12.9898);
+    return s - Math.floor(s);
+  }
+
+  random2D(x, z, salt = 0) {
+    return this.pseudoRandom(x, 0, z, salt);
+  }
+
+  random3D(x, y, z, salt = 0) {
+    return this.pseudoRandom(x, y, z, salt);
   }
 
   getChunk(cx, cz) {

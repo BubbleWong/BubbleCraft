@@ -38,10 +38,6 @@ const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
 
-const DEBUG_PHYSICS = false;
-
-const vecToString = (v) => `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
-const debugLog = () => {};
 
 let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
 let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
@@ -165,7 +161,7 @@ function highestGroundUnder(position, maxY = position.y) {
     const height = world.getSurfaceHeightAt(position.x + ox, position.z + oz, maxY);
     if (height > highest) highest = height;
   }
-  return highest;
+  return Number.isFinite(highest) ? highest : 0;
 }
 
 function collidesAt(position) {

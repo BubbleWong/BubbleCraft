@@ -38,10 +38,19 @@ const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
 
+const DEBUG_PHYSICS = true;
+
+const vecToString = (v) => `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
+const debugLog = (...args) => {
+  if (!DEBUG_PHYSICS) return;
+  console.log('[physics]', ...args);
+};
+
 let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
 let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
 let wasGroundedPrevious = true;
 let takeoffGroundHeight = currentGroundHeight;
+const lastSafePosition = controls.getObject().position.clone();
 
 overlay.addEventListener('click', () => controls.lock());
 controls.addEventListener('lock', () => overlay.classList.add('hidden'));
@@ -189,39 +198,44 @@ function collidesAt(position) {
 function resolvePenetration(position, velocity) {
   if (!collidesAt(position)) return;
 
-  for (let i = 0; i < 8 && collidesAt(position); i += 1) {
-    position.y += 0.1;
-  }
+  debugLog('penetration detected (pre-step)', { pos: vecToString(position), vel: vecToString(velocity) });
 
-  if (collidesAt(position)) {
-    const ground = highestGroundUnder(position, position.y);
-    if (Number.isFinite(ground)) {
-      position.y = ground + playerHeight + FOOT_BUFFER;
-    }
+  let attempts = 0;
+  while (collidesAt(position) && attempts < 12) {
+    position.y += 0.05;
+    if (velocity.y < 0) velocity.y = 0;
+    attempts += 1;
+  }
+  if (attempts > 0) {
+    debugLog('lifted vertically to resolve collision', { attempts, pos: vecToString(position) });
   }
 
   if (collidesAt(position)) {
     for (const [ox, oz] of SAMPLE_OFFSETS) {
-      position.x += ox * 0.25;
-      position.z += oz * 0.25;
-      if (!collidesAt(position)) break;
+      position.x += ox * 0.1;
+      position.z += oz * 0.1;
+      if (!collidesAt(position)) {
+        debugLog('horizontal nudge resolved collision', { offset: [ox.toFixed(2), oz.toFixed(2)], pos: vecToString(position) });
+        break;
+      }
+      position.x -= ox * 0.1;
+      position.z -= oz * 0.1;
     }
   }
 
   if (collidesAt(position)) {
-    position.x = Math.round(position.x) + 0.5;
-    position.z = Math.round(position.z) + 0.5;
-  }
-
-  if (collidesAt(position)) {
-    const ground = highestGroundUnder(position, position.y);
+    const ground = highestGroundUnder(position, position.y + playerHeight);
     if (Number.isFinite(ground)) {
       position.y = ground + playerHeight + FOOT_BUFFER;
+      if (velocity.y < 0) velocity.y = 0;
+      debugLog('snapped to ground while resolving collision', { ground: ground.toFixed(2), pos: vecToString(position) });
     }
   }
 
   if (collidesAt(position)) {
+    position.copy(lastSafePosition);
     velocity.set(0, 0, 0);
+    debugLog('reverted to last safe position', { pos: vecToString(position) });
   }
 }
 
@@ -277,8 +291,17 @@ function updatePhysics(delta) {
 
   const feetBefore = object.position.y - playerHeight;
   const groundedBefore = Math.abs(feetBefore - currentGroundHeight) <= 0.1;
-  const surfaceAhead = highestGroundUnder(object.position, object.position.y);
+  const surfaceAhead = world.getSurfaceHeightAt(
+    object.position.x,
+    object.position.z,
+    currentGroundHeight + MAX_STEP_HEIGHT + 0.1
+  );
   if (groundedBefore && surfaceAhead > currentGroundHeight + MAX_STEP_HEIGHT) {
+    debugLog('step prevented', {
+      surfaceAhead: surfaceAhead.toFixed(2),
+      ground: currentGroundHeight.toFixed(2),
+      pos: vecToString(object.position),
+    });
     object.position.x = prevX;
     object.position.z = prevZ;
     velocity.x = 0;
@@ -292,6 +315,10 @@ function updatePhysics(delta) {
   if (currentFoot > maxAllowedFoot) {
     object.position.y = maxAllowedFoot + playerHeight;
     if (velocity.y > 0) velocity.y = 0;
+    debugLog('jump height clamped', {
+      maxAllowedFoot: maxAllowedFoot.toFixed(2),
+      pos: vecToString(object.position),
+    });
   }
 
   const footY = object.position.y - playerHeight;
@@ -306,6 +333,11 @@ function updatePhysics(delta) {
   }
 
   if (grounded && surface > maxClimbHeight) {
+    debugLog('prevented landing above limit', {
+      surface: surface.toFixed(2),
+      maxClimbHeight: maxClimbHeight.toFixed(2),
+      pos: vecToString(object.position),
+    });
     object.position.copy(previousPosition);
     velocity.x = 0;
     velocity.z = 0;
@@ -319,15 +351,24 @@ function updatePhysics(delta) {
   }
 
   if (collidesAt(object.position)) {
-    object.position.copy(previousPosition);
+    debugLog('post-step collision, reverting', {
+      pos: vecToString(object.position),
+      previous: vecToString(previousPosition),
+    });
+    object.position.x = previousPosition.x;
+    object.position.z = previousPosition.z;
     velocity.x = 0;
     velocity.z = 0;
-    if (velocity.y > 0) velocity.y = 0;
-    currentGroundHeight = previousGround;
-    takeoffGroundHeight = previousGround;
-    maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
-    wasGroundedPrevious = wasGroundedPrevFrame;
-    canJump = wasGroundedPrevFrame;
+    resolvePenetration(object.position, velocity);
+    if (collidesAt(object.position)) {
+      object.position.copy(lastSafePosition);
+      velocity.set(0, Math.min(velocity.y, 0), 0);
+      currentGroundHeight = highestGroundUnder(object.position, object.position.y);
+      takeoffGroundHeight = currentGroundHeight;
+      maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+      wasGroundedPrevious = true;
+      canJump = true;
+    }
     return;
   }
 
@@ -340,11 +381,22 @@ function updatePhysics(delta) {
     currentGroundHeight = surface;
     takeoffGroundHeight = surface;
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    debugLog('grounded', {
+      ground: surface.toFixed(2),
+      pos: vecToString(object.position),
+      velocityY: velocity.y.toFixed(3),
+    });
   } else {
     canJump = false;
   }
 
   wasGroundedPrevious = grounded;
+  resolvePenetration(object.position, velocity);
+
+  if (!collidesAt(object.position)) {
+    lastSafePosition.copy(object.position);
+    debugLog('updated last safe position', { pos: vecToString(lastSafePosition) });
+  }
 }
 
 function animate() {

@@ -11,9 +11,10 @@ const BLOCK_TYPES = {
   sand: 4,
   wood: 5,
   leaves: 6,
-  crystal: 7,
-  flowerRed: 8,
-  flowerYellow: 9,
+  gold: 7,
+  diamond: 8,
+  flowerRed: 9,
+  flowerYellow: 10,
 };
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -25,7 +26,8 @@ const BLOCK_TYPE_LABELS = {
   [BLOCK_TYPES.sand]: 'Sand',
   [BLOCK_TYPES.wood]: 'Wood',
   [BLOCK_TYPES.leaves]: 'Leaves',
-  [BLOCK_TYPES.crystal]: 'Crystal',
+  [BLOCK_TYPES.gold]: 'Gold',
+  [BLOCK_TYPES.diamond]: 'Diamond',
   [BLOCK_TYPES.flowerRed]: 'Flower (Red)',
   [BLOCK_TYPES.flowerYellow]: 'Flower (Yellow)',
 };
@@ -37,7 +39,8 @@ const BLOCK_COLORS = {
   [BLOCK_TYPES.sand]: [0.93, 0.87, 0.63],
   [BLOCK_TYPES.wood]: [0.54, 0.35, 0.19],
   [BLOCK_TYPES.leaves]: [0.29, 0.62, 0.28],
-  [BLOCK_TYPES.crystal]: [0.62, 0.82, 0.97],
+  [BLOCK_TYPES.gold]: [0.97, 0.83, 0.36],
+  [BLOCK_TYPES.diamond]: [0.53, 0.84, 0.92],
   [BLOCK_TYPES.flowerRed]: [0.86, 0.23, 0.27],
   [BLOCK_TYPES.flowerYellow]: [0.96, 0.88, 0.33],
 };
@@ -124,9 +127,11 @@ class Chunk {
           } else if (terrainHeight - y <= 3) {
             blockType = BLOCK_TYPES.dirt;
           } else if (blockType === BLOCK_TYPES.stone && y > 6 && y < terrainHeight - 4) {
-            const crystalChance = this.world.random3D(worldX, y, worldZ, 79);
-            if (crystalChance > 0.93) {
-              blockType = BLOCK_TYPES.crystal;
+            const oreChance = this.world.random3D(worldX, y, worldZ, 79);
+            if (oreChance > 0.97) {
+              blockType = BLOCK_TYPES.diamond;
+            } else if (oreChance > 0.93) {
+              blockType = BLOCK_TYPES.gold;
             }
           }
           this.set(lx, y, lz, blockType);

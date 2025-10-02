@@ -52,6 +52,8 @@ const FLOWER_CENTER_COLOR = [0.98, 0.94, 0.62];
 const FLOWER_STEM_COLOR = [0.25, 0.65, 0.38];
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
+const isTransparentBlock = (blockType) =>
+  blockType === BLOCK_TYPES.flowerRed || blockType === BLOCK_TYPES.flowerYellow;
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -406,7 +408,8 @@ class Chunk {
 
           for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
             const face = FACE_DEFS[faceIndex];
-            const neighborType = this.world.getBlock(worldX + face.dir[0], worldY + face.dir[1], worldZ + face.dir[2]);
+            let neighborType = this.world.getBlock(worldX + face.dir[0], worldY + face.dir[1], worldZ + face.dir[2]);
+            if (isTransparentBlock(neighborType)) neighborType = BLOCK_TYPES.air;
             if (neighborType !== BLOCK_TYPES.air) continue;
 
             const shade = face.shade ?? 1;

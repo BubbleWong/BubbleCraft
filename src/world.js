@@ -41,9 +41,17 @@ const BLOCK_COLORS = {
   [BLOCK_TYPES.leaves]: [0.29, 0.62, 0.28],
   [BLOCK_TYPES.gold]: [0.97, 0.83, 0.36],
   [BLOCK_TYPES.diamond]: [0.53, 0.84, 0.92],
-  [BLOCK_TYPES.flowerRed]: [0.86, 0.23, 0.27],
-  [BLOCK_TYPES.flowerYellow]: [0.96, 0.88, 0.33],
 };
+
+const FLOWER_PETAL_COLORS = {
+  [BLOCK_TYPES.flowerRed]: [0.9, 0.25, 0.32],
+  [BLOCK_TYPES.flowerYellow]: [0.98, 0.88, 0.38],
+};
+
+const FLOWER_CENTER_COLOR = [0.98, 0.94, 0.62];
+const FLOWER_STEM_COLOR = [0.25, 0.65, 0.38];
+
+const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -55,6 +63,43 @@ const FACE_DEFS = [
 ];
 
 const TRIANGLE_INDICES = [0, 1, 2, 0, 2, 3];
+
+const mix = (a, b, t) => a * (1 - t) + b * t;
+
+function addColorNoise(base, noise) {
+  return [
+    clamp01(base[0] + noise),
+    clamp01(base[1] + noise),
+    clamp01(base[2] + noise),
+  ];
+}
+
+function tintForFace(blockType, baseColor, shade, world, worldX, worldY, worldZ, faceIndex, cornerIndex) {
+  let color = baseColor;
+  if (blockType === BLOCK_TYPES.grass && faceIndex !== 3) {
+    const tint = 0.07;
+    color = [baseColor[0] + tint, baseColor[1] + tint, baseColor[2] + tint];
+  }
+  if (blockType === BLOCK_TYPES.wood && (faceIndex === 2 || faceIndex === 3)) {
+    color = [0.62, 0.45, 0.23];
+  }
+  if (blockType === BLOCK_TYPES.leaves) {
+    const leafNoise = (world.random3D(worldX, worldY, worldZ, faceIndex * 11 + cornerIndex) - 0.5) * 0.2;
+    color = addColorNoise(color, leafNoise);
+  }
+  if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) {
+    const sparkle = Math.abs(Math.sin(worldX * 0.3 + worldZ * 0.7 + faceIndex)) * 0.15;
+    color = [color[0] + sparkle, color[1] + sparkle * (blockType === BLOCK_TYPES.gold ? 1 : 1.2), color[2] + sparkle];
+  }
+
+  const noise = (world.random3D(worldX, worldY, worldZ, faceIndex * 17 + cornerIndex) - 0.5) * 0.08;
+  const shaded = shade + noise;
+  return [
+    clamp01(color[0] * shaded),
+    clamp01(color[1] * shaded),
+    clamp01(color[2] * shaded),
+  ];
+}
 
 const chunkKey = (cx, cz) => `${cx},${cz}`;
 
@@ -245,6 +290,97 @@ class Chunk {
     }
   }
 
+  addCross(positions, normals, colors, centerX, centerZ, bottomY, topY, halfWidth, faceColor) {
+    const quads = [
+      {
+        corners: [
+          [centerX - halfWidth, bottomY, centerZ],
+          [centerX + halfWidth, bottomY, centerZ],
+          [centerX + halfWidth, topY, centerZ],
+          [centerX - halfWidth, topY, centerZ],
+        ],
+        normal: [0, 0, 1],
+      },
+      {
+        corners: [
+          [centerX, bottomY, centerZ - halfWidth],
+          [centerX, bottomY, centerZ + halfWidth],
+          [centerX, topY, centerZ + halfWidth],
+          [centerX, topY, centerZ - halfWidth],
+        ],
+        normal: [1, 0, 0],
+      },
+    ];
+    const frontOrder = [0, 1, 2, 0, 2, 3];
+    const backOrder = [0, 2, 1, 0, 3, 2];
+    for (const quad of quads) {
+      const { corners, normal } = quad;
+      for (const indices of [frontOrder, backOrder]) {
+        const usedNormal = indices === frontOrder ? normal : normal.map((n) => -n);
+        for (const idx of indices) {
+          const vertex = corners[idx];
+          positions.push(vertex[0], vertex[1], vertex[2]);
+          normals.push(usedNormal[0], usedNormal[1], usedNormal[2]);
+          colors.push(faceColor[0], faceColor[1], faceColor[2]);
+        }
+      }
+    }
+  }
+
+  addFlowerGeometry(positions, normals, colors, lx, y, lz, blockType) {
+    const centerX = lx + 0.5;
+    const centerZ = lz + 0.5;
+    const stemBottom = y;
+    const stemTop = y + 0.45;
+    const petalBottom = y + 0.4;
+    const petalTop = y + 0.95;
+
+    const stemHalf = 0.05;
+    const petalHalf = 0.32;
+    const petalColor = FLOWER_PETAL_COLORS[blockType] ?? [1, 1, 1];
+
+    this.addCross(positions, normals, colors, centerX, centerZ, stemBottom, stemTop, stemHalf, FLOWER_STEM_COLOR);
+    this.addCross(positions, normals, colors, centerX, centerZ, petalBottom, petalTop, petalHalf, petalColor);
+
+    const centerRadius = 0.12;
+    const centerBottom = petalTop - 0.25;
+    const centerTop = petalTop;
+    const quads = [
+      {
+        corners: [
+          [centerX - centerRadius, centerBottom, centerZ],
+          [centerX + centerRadius, centerBottom, centerZ],
+          [centerX + centerRadius, centerTop, centerZ],
+          [centerX - centerRadius, centerTop, centerZ],
+        ],
+        normal: [0, 0, 1],
+      },
+      {
+        corners: [
+          [centerX, centerBottom, centerZ - centerRadius],
+          [centerX, centerBottom, centerZ + centerRadius],
+          [centerX, centerTop, centerZ + centerRadius],
+          [centerX, centerTop, centerZ - centerRadius],
+        ],
+        normal: [1, 0, 0],
+      },
+    ];
+    const frontOrder = [0, 1, 2, 0, 2, 3];
+    const backOrder = [0, 2, 1, 0, 3, 2];
+    for (const quad of quads) {
+      const { corners, normal } = quad;
+      for (const indices of [frontOrder, backOrder]) {
+        const usedNormal = indices === frontOrder ? normal : normal.map((n) => -n);
+        for (const idx of indices) {
+          const vertex = corners[idx];
+          positions.push(vertex[0], vertex[1], vertex[2]);
+          normals.push(usedNormal[0], usedNormal[1], usedNormal[2]);
+          colors.push(FLOWER_CENTER_COLOR[0], FLOWER_CENTER_COLOR[1], FLOWER_CENTER_COLOR[2]);
+        }
+      }
+    }
+  }
+
   buildMesh() {
     const positions = [];
     const normals = [];
@@ -257,23 +393,30 @@ class Chunk {
           if (blockType === BLOCK_TYPES.air) continue;
 
           const color = BLOCK_COLORS[blockType];
-          if (!color) continue;
+          if (!color && blockType !== BLOCK_TYPES.flowerRed && blockType !== BLOCK_TYPES.flowerYellow) continue;
+
+          if (blockType === BLOCK_TYPES.flowerRed || blockType === BLOCK_TYPES.flowerYellow) {
+            this.addFlowerGeometry(positions, normals, colors, lx, y, lz, blockType);
+            continue;
+          }
 
           const worldX = this.origin.x + lx;
           const worldY = y;
           const worldZ = this.origin.z + lz;
 
-          for (const face of FACE_DEFS) {
+          for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
+            const face = FACE_DEFS[faceIndex];
             const neighborType = this.world.getBlock(worldX + face.dir[0], worldY + face.dir[1], worldZ + face.dir[2]);
             if (neighborType !== BLOCK_TYPES.air) continue;
 
             const shade = face.shade ?? 1;
-            for (let i = 0; i < TRIANGLE_INDICES.length; i += 1) {
-              const cornerIndex = TRIANGLE_INDICES[i];
+            for (let tri = 0; tri < TRIANGLE_INDICES.length; tri += 1) {
+              const cornerIndex = TRIANGLE_INDICES[tri];
               const corner = face.corners[cornerIndex];
               positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
               normals.push(face.dir[0], face.dir[1], face.dir[2]);
-              colors.push(color[0] * shade, color[1] * shade, color[2] * shade);
+              const tinted = tintForFace(blockType, color, shade, this.world, worldX, worldY, worldZ, faceIndex, cornerIndex);
+              colors.push(tinted[0], tinted[1], tinted[2]);
             }
           }
         }
@@ -471,5 +614,4 @@ export class World {
   }
 }
 
-export { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES };
-export { BLOCK_TYPE_LABELS };
+export { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES, BLOCK_TYPE_LABELS };

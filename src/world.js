@@ -64,6 +64,7 @@ const FACE_DEFS = [
   { dir: [0, 0, -1], shade: 0.7, corners: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]] }, // -Z
 ];
 
+const TRIANGLE_ORDER = [0, 1, 2, 0, 2, 3];
 const mix = (a, b, t) => a * (1 - t) + b * t;
 
 const TOP_FACE_INDEX = 2;
@@ -108,11 +109,12 @@ function computeFaceUV(faceIndex, corner) {
 }
 
 function getFaceResolution(blockType, faceIndex) {
-  if (blockType === BLOCK_TYPES.grass && faceIndex === TOP_FACE_INDEX) return 8;
-  if (blockType === BLOCK_TYPES.wood && (faceIndex === TOP_FACE_INDEX || faceIndex === BOTTOM_FACE_INDEX)) return 8;
-  if (blockType === BLOCK_TYPES.leaves) return 5;
-  if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) return 6;
-  return 6;
+  if (blockType === BLOCK_TYPES.grass && faceIndex === TOP_FACE_INDEX) return 12;
+  if (blockType === BLOCK_TYPES.wood && (faceIndex === TOP_FACE_INDEX || faceIndex === BOTTOM_FACE_INDEX)) return 10;
+  if (blockType === BLOCK_TYPES.leaves) return 6;
+  if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) return 10;
+  if (blockType === BLOCK_TYPES.sand) return 10;
+  return 8;
 }
 
 function interpolateCorner(origin, uAxis, vAxis, u, v) {
@@ -143,129 +145,149 @@ function applyTextureDetail(blockType, baseColor, faceIndex, corner, world, worl
 
   switch (blockType) {
     case BLOCK_TYPES.grass: {
-      const topShadow = [0.24, 0.47, 0.16];
-      const topBase = [0.36, 0.66, 0.24];
-      const topHighlight = [0.58, 0.86, 0.37];
+      const topShadow = [0.23, 0.47, 0.18];
+      const topMid = [0.35, 0.68, 0.26];
+      const topHighlight = [0.59, 0.88, 0.4];
       if (faceIndex === TOP_FACE_INDEX) {
         const tuft = pixelNoise(10);
-        const patch = pixelNoise(11);
-        const sparkle = pixelNoise(12);
-        let blend = clamp01(0.25 + tuft * 0.6);
-        let grassTop = mixColor(topShadow, topHighlight, blend);
-        if (patch > 0.78) grassTop = mixColor(grassTop, topHighlight, 0.4);
-        if (patch < 0.18) grassTop = mixColor(grassTop, topShadow, 0.6);
-        grassTop[0] = clamp01(grassTop[0] + (sparkle - 0.5) * 0.06);
-        grassTop[1] = clamp01(grassTop[1] + (sparkle - 0.5) * 0.08);
-        return grassTop;
+        const blade = pixelNoise(11);
+        const weave = ((pixelU + pixelV) % 2) * 0.08;
+        const radial = Math.sin((pixelU - 7.5) * 0.6 + (pixelV - 7.5) * 0.6) * 0.1;
+        let blend = clamp01(0.25 + tuft * 0.55 + radial + weave);
+        let grass = mixColor(topShadow, topHighlight, blend);
+        if (blade > 0.78) grass = mixColor(grass, topHighlight, 0.5);
+        if (blade < 0.14) grass = mixColor(grass, topShadow, 0.6);
+        grass[0] = clamp01(grass[0] + (pixelNoise(12) - 0.5) * 0.05);
+        grass[1] = clamp01(grass[1] + (pixelNoise(13) - 0.5) * 0.07);
+        return grass;
       }
-      const dirtDark = [0.33, 0.23, 0.13];
-      const dirtLight = [0.61, 0.45, 0.26];
+      const dirtShadow = [0.28, 0.19, 0.11];
+      const dirtHighlight = [0.66, 0.48, 0.28];
       if (faceIndex === BOTTOM_FACE_INDEX) {
-        const soilBlend = clamp01(0.4 + pixelNoise(18) * 0.5);
-        return mixColor(dirtDark, dirtLight, soilBlend);
+        const soilBlend = clamp01(0.4 + pixelNoise(18) * 0.6);
+        return mixColor(dirtShadow, dirtHighlight, soilBlend);
       }
       if (isSideFace) {
-        const topThreshold = 11 + Math.floor((pixelNoise(20) - 0.5) * 3);
-        if (pixelV >= topThreshold) {
-          const tuft = pixelNoise(22);
-          const border = pixelNoise(pixelU + 31);
-          let sideGrass = mixColor(topBase, topHighlight, clamp01(0.4 + tuft * 0.5));
-          sideGrass[1] = clamp01(sideGrass[1] + (border - 0.5) * 0.1);
+        const grassLine = 12 + Math.floor((pixelNoise(20) - 0.5) * 2);
+        if (pixelV >= grassLine) {
+          const fringe = pixelNoise(21);
+          const edge = pixelNoise(pixelU + 37);
+          let sideGrass = mixColor(topMid, topHighlight, clamp01(0.35 + fringe * 0.6));
+          sideGrass[1] = clamp01(sideGrass[1] + (edge - 0.5) * 0.12);
           return sideGrass;
         }
-        const soilBlend = clamp01(0.25 + pixelNoise(24) * 0.65);
-        let soil = mixColor(dirtDark, dirtLight, soilBlend);
-        if (pixelNoise(25) > 0.85) soil = mixColor(soil, dirtDark, 0.7);
-        if (pixelNoise(26) < 0.08) soil = mixColor(soil, [0.68, 0.52, 0.32], 0.4);
-        soil[1] = clamp01(soil[1] + (pixelNoise(pixelV + 28) - 0.5) * 0.05);
+        const stratum = Math.floor(pixelV / 3);
+        let soil = mixColor(dirtShadow, dirtHighlight, clamp01(0.25 + pixelNoise(24 + stratum) * 0.7));
+        if (pixelNoise(28) > 0.86) soil = mixColor(soil, dirtShadow, 0.65);
+        if (pixelNoise(29) < 0.08) soil = mixColor(soil, [0.54, 0.39, 0.23], 0.5);
+        soil = soil.map((c, idx) => clamp01(c + (pixelNoise(30 + idx) - 0.5) * 0.04));
         return soil;
       }
       return baseColor;
     }
     case BLOCK_TYPES.dirt: {
-      const soilDark = [0.32, 0.21, 0.12];
-      const soilLight = [0.63, 0.46, 0.31];
-      const blend = clamp01(0.3 + pixelNoise(40) * 0.7);
-      let soil = mixColor(soilDark, soilLight, blend);
-      if (pixelNoise(41) > 0.82) soil = mixColor(soil, [0.7, 0.54, 0.35], 0.4);
-      if (pixelNoise(42) < 0.12) soil = mixColor(soil, [0.26, 0.18, 0.1], 0.6);
-      soil[1] = clamp01(soil[1] + (pixelNoise(43) - 0.5) * 0.04);
+      const soilDark = [0.28, 0.18, 0.09];
+      const soilMid = [0.48, 0.33, 0.18];
+      const soilLight = [0.68, 0.51, 0.32];
+      const strata = Math.sin(pixelV * 0.45 + worldCornerY * 0.3);
+      let soil = mixColor(soilDark, soilLight, clamp01(0.35 + pixelNoise(40) * 0.65 + strata * 0.1));
+      if (pixelNoise(41) > 0.82) soil = mixColor(soil, soilLight, 0.4);
+      if (pixelNoise(42) < 0.12) soil = mixColor(soil, soilDark, 0.6);
+      const pebble = pixelNoise(43);
+      if (pebble > 0.9) soil = mixColor(soil, [0.75, 0.58, 0.38], 0.45);
+      soil[1] = clamp01(soil[1] + (pixelNoise(44) - 0.5) * 0.05);
+      soil[0] = clamp01(soil[0] + (pixelNoise(45) - 0.5) * 0.03);
       return soil;
     }
     case BLOCK_TYPES.stone: {
-      const stoneDark = [0.34, 0.35, 0.4];
-      const stoneMid = [0.58, 0.6, 0.66];
-      const stoneLight = [0.78, 0.8, 0.85];
-      let stone = mixColor(stoneDark, stoneMid, pixelNoise(60));
+      const stoneDeep = [0.28, 0.29, 0.33];
+      const stoneMid = [0.52, 0.55, 0.6];
+      const stoneLight = [0.78, 0.8, 0.86];
+      const grain = pixelNoise(60);
+      let stone = mixColor(stoneDeep, stoneMid, clamp01(0.25 + grain * 0.6));
       const fleck = pixelNoise(61);
-      if (fleck > 0.82) stone = mixColor(stone, stoneLight, 0.6);
-      if (fleck < 0.18) stone = mixColor(stone, stoneDark, 0.7);
-      if ((pixelU % 5 === 0 || pixelV % 4 === 0) && pixelNoise(62) > 0.68) {
-        stone = mixColor(stone, stoneDark, 0.8);
+      if (fleck > 0.82) stone = mixColor(stone, stoneLight, 0.55);
+      if (fleck < 0.16) stone = mixColor(stone, stoneDeep, 0.7);
+      if ((pixelU % 4 === 0 || pixelV % 5 === 0) && pixelNoise(62) > 0.65) {
+        stone = mixColor(stone, stoneDeep, 0.6);
       }
       stone = stone.map((c) => clamp01(c + (pixelNoise(63) - 0.5) * 0.05));
       return stone;
     }
     case BLOCK_TYPES.sand: {
-      const sandShadow = [0.86, 0.78, 0.57];
-      const sandLight = [0.97, 0.91, 0.71];
-      let sand = mixColor(sandShadow, sandLight, clamp01(0.35 + pixelNoise(80) * 0.65));
-      const ripple = Math.sin((worldCornerX + worldCornerZ) * 4.5 + pixelV * 0.8 + faceIndex * 2);
-      sand = sand.map((c, idx) => clamp01(c + ripple * (idx === 1 ? 0.035 : 0.025)));
+      const sandShadow = [0.82, 0.74, 0.53];
+      const sandMid = [0.93, 0.87, 0.64];
+      const sandLight = [0.99, 0.95, 0.78];
+      const ripple = Math.sin((worldCornerX + worldCornerZ) * 5.1 + pixelV * 0.7);
+      let sand = mixColor(sandShadow, sandMid, clamp01(0.3 + pixelNoise(80) * 0.5 + ripple * 0.08));
       if (pixelNoise(81) > 0.88) sand = mixColor(sand, sandLight, 0.5);
-      if (pixelNoise(82) < 0.08) sand = mixColor(sand, sandShadow, 0.4);
+      if (pixelNoise(82) < 0.08) sand = mixColor(sand, sandShadow, 0.45);
+      sand = sand.map((c, idx) => clamp01(c + (pixelNoise(83 + idx) - 0.5) * (idx === 1 ? 0.05 : 0.035)));
       return sand;
     }
     case BLOCK_TYPES.wood: {
-      const barkDark = [0.32, 0.2, 0.1];
-      const barkLight = [0.65, 0.46, 0.24];
-      const heartwood = [0.69, 0.52, 0.28];
+      const barkDark = [0.3, 0.18, 0.08];
+      const barkLight = [0.65, 0.45, 0.23];
+      const heartwood = [0.7, 0.53, 0.3];
       if (faceIndex === TOP_FACE_INDEX || faceIndex === BOTTOM_FACE_INDEX) {
         const dx = corner[0] - 0.5;
         const dz = corner[2] - 0.5;
         const radius = Math.sqrt(dx * dx + dz * dz);
-        const ring = Math.sin(radius * 22 + worldX * 0.4 + worldZ * 0.4);
+        const ring = Math.sin(radius * 24 + worldX * 0.35 + worldZ * 0.35);
         let wood = mixColor(heartwood, barkLight, clamp01(0.45 + ring * 0.45));
-        const core = Math.exp(-radius * 7);
-        wood = wood.map((c, idx) => clamp01(c + core * (idx === 1 ? 0.05 : 0.02)));
-        if (pixelNoise(100) > 0.86) wood = mixColor(wood, barkDark, 0.5);
+        const core = Math.exp(-radius * 6.5);
+        wood = wood.map((c, idx) => clamp01(c + core * (idx === 1 ? 0.08 : 0.03)));
+        if (pixelNoise(100) > 0.84) wood = mixColor(wood, barkDark, 0.5);
         return wood;
       }
-      const stripe = pixelU % 4;
-      let wood = stripe === 0 || stripe === 3 ? barkDark.slice() : barkLight.slice();
-      const grain = Math.sin((worldCornerY + worldCornerZ) * 6 + pixelU * 0.7);
-      wood = wood.map((c, idx) => clamp01(c + grain * (idx === 1 ? 0.05 : 0.03)));
-      if (pixelNoise(101) > 0.82) wood = mixColor(wood, [0.24, 0.14, 0.07], 0.6);
-      if (pixelNoise(102) < 0.1) wood = mixColor(wood, barkLight, 0.4);
+      const verticalBand = pixelU % 6;
+      let wood = verticalBand <= 1 || verticalBand >= 5 ? barkDark.slice() : barkLight.slice();
+      const grain = Math.sin((worldCornerY + worldCornerZ) * 7 + pixelU * 0.8 + pixelNoise(101) * 2);
+      wood = wood.map((c, idx) => clamp01(c + grain * (idx === 1 ? 0.06 : 0.03)));
+      const knot = pixelNoise(102);
+      if (knot > 0.87) wood = mixColor(wood, [0.24, 0.14, 0.07], 0.7);
+      if (knot < 0.12) wood = mixColor(wood, barkLight, 0.35);
       return wood;
     }
     case BLOCK_TYPES.leaves: {
-      const leafDark = [0.14, 0.35, 0.1];
-      const leafLight = [0.54, 0.8, 0.32];
-      let leaf = mixColor(leafDark, baseColor, clamp01(0.3 + pixelNoise(120) * 0.6));
-      if (pixelNoise(121) > 0.85) leaf = mixColor(leaf, leafLight, 0.5);
-      if (pixelNoise(122) < 0.1) leaf = mixColor(leaf, leafDark, 0.7);
-      const translucency = Math.max(0, Math.sin((worldCornerX + worldCornerY + worldCornerZ) * 0.8));
-      leaf[1] = clamp01(leaf[1] + translucency * 0.08);
+      const leafShadow = [0.1, 0.28, 0.08];
+      const leafMid = [0.32, 0.58, 0.18];
+      const leafHighlight = [0.62, 0.9, 0.34];
+      let leaf = mixColor(leafShadow, leafHighlight, clamp01(0.2 + pixelNoise(120) * 0.65));
+      if (pixelNoise(121) > 0.85) leaf = mixColor(leaf, leafHighlight, 0.5);
+      if (pixelNoise(122) < 0.1) leaf = mixColor(leaf, leafShadow, 0.6);
+      const dapple = Math.max(0, Math.sin((worldCornerX + worldCornerZ) * 1.2 + pixelNoise(123) * Math.PI));
+      leaf[1] = clamp01(leaf[1] + dapple * 0.1);
+      leaf[0] = clamp01(leaf[0] + dapple * 0.04);
       return leaf;
     }
     case BLOCK_TYPES.gold: {
-      const goldBase = [0.83, 0.63, 0.2];
-      const goldBright = [1, 0.94, 0.55];
-      let gold = mixColor(goldBase, goldBright, clamp01(0.4 + pixelNoise(140) * 0.6));
-      if (pixelNoise(141) > 0.86) gold = mixColor(gold, goldBright, 0.7);
-      if ((pixelU % 6 === 0 || pixelV % 6 === 0) && pixelNoise(142) > 0.7) {
-        gold = mixColor(gold, [0.96, 0.78, 0.3], 0.5);
+      const stoneBase = applyTextureDetail(BLOCK_TYPES.stone, BLOCK_COLORS[BLOCK_TYPES.stone], faceIndex, corner, world, worldX, worldY, worldZ);
+      const goldOre = [0.96, 0.82, 0.34];
+      const goldHighlight = [1, 0.95, 0.6];
+      const cluster = pixelNoise(140);
+      const mask = pixelNoise(141);
+      if (cluster > 0.55 + Math.sin((pixelU + pixelV) * 0.3) * 0.1) {
+        const intensity = clamp01((cluster - 0.45) + (mask - 0.4) * 0.6);
+        let ore = mixColor(goldOre, goldHighlight, clamp01(0.2 + intensity));
+        if (pixelNoise(142) > 0.82) ore = mixColor(ore, goldHighlight, 0.6);
+        return mixColor(stoneBase, ore, clamp01(0.55 + intensity * 0.5));
       }
-      return gold;
+      return stoneBase.map((c, idx) => clamp01(c * (idx === 1 ? 1 : 0.96)));
     }
     case BLOCK_TYPES.diamond: {
-      const diamondBase = [0.45, 0.78, 0.86];
-      const diamondBright = [0.82, 0.97, 1];
-      let diamond = mixColor(diamondBase, diamondBright, clamp01(0.45 + pixelNoise(160) * 0.55));
-      if (pixelNoise(161) > 0.84) diamond = mixColor(diamond, [0.9, 1, 1], 0.6);
-      if (pixelNoise(162) < 0.18) diamond = mixColor(diamond, [0.32, 0.65, 0.75], 0.5);
-      return diamond;
+      const stoneBase = applyTextureDetail(BLOCK_TYPES.stone, BLOCK_COLORS[BLOCK_TYPES.stone], faceIndex, corner, world, worldX, worldY, worldZ);
+      const diamondOre = [0.55, 0.82, 0.9];
+      const diamondHighlight = [0.85, 0.97, 1];
+      const cluster = pixelNoise(160);
+      const mask = pixelNoise(161);
+      if (cluster > 0.58 + Math.cos((pixelU - pixelV) * 0.35) * 0.08) {
+        const intensity = clamp01((cluster - 0.48) + (mask - 0.5) * 0.7);
+        let ore = mixColor(diamondOre, diamondHighlight, clamp01(0.35 + intensity));
+        if (pixelNoise(162) > 0.87) ore = mixColor(ore, diamondHighlight, 0.6);
+        return mixColor(stoneBase, ore, clamp01(0.6 + intensity * 0.45));
+      }
+      return stoneBase.map((c, idx) => clamp01(idx === 2 ? c * 1.02 : c * 0.97));
     }
     default:
       return color;
@@ -322,8 +344,6 @@ function emitDetailedFace(
 ) {
   const resolution = Math.max(1, getFaceResolution(blockType, faceIndex));
   const { origin, uAxis, vAxis } = FACE_AXES[faceIndex];
-  const triangleOrder = [0, 1, 2, 0, 2, 3];
-
   for (let iu = 0; iu < resolution; iu += 1) {
     const u0 = iu / resolution;
     const u1 = (iu + 1) / resolution;
@@ -338,7 +358,7 @@ function emitDetailedFace(
         interpolateCorner(origin, uAxis, vAxis, u1, v0),
       ];
 
-      for (const idx of triangleOrder) {
+      for (const idx of TRIANGLE_ORDER) {
         const corner = quadCorners[idx];
         positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
         normals.push(face.dir[0], face.dir[1], face.dir[2]);

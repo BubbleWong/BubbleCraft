@@ -64,43 +64,289 @@ const FACE_DEFS = [
   { dir: [0, 0, -1], shade: 0.7, corners: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]] }, // -Z
 ];
 
-const TRIANGLE_INDICES = [0, 1, 2, 0, 2, 3];
-
 const mix = (a, b, t) => a * (1 - t) + b * t;
 
-function addColorNoise(base, noise) {
+const TOP_FACE_INDEX = 2;
+const BOTTOM_FACE_INDEX = 3;
+
+const FACE_AXES = FACE_DEFS.map((face) => {
+  const origin = face.corners[0];
+  const uAxis = [
+    face.corners[3][0] - origin[0],
+    face.corners[3][1] - origin[1],
+    face.corners[3][2] - origin[2],
+  ];
+  const vAxis = [
+    face.corners[1][0] - origin[0],
+    face.corners[1][1] - origin[1],
+    face.corners[1][2] - origin[2],
+  ];
+  return { origin, uAxis, vAxis };
+});
+
+function mixColor(a, b, t) {
+  return [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
+}
+
+function computeFaceUV(faceIndex, corner) {
+  switch (faceIndex) {
+    case 0: // +X
+      return { u: 1 - corner[2], v: corner[1] };
+    case 1: // -X
+      return { u: corner[2], v: corner[1] };
+    case TOP_FACE_INDEX: // +Y
+      return { u: corner[0], v: corner[2] };
+    case BOTTOM_FACE_INDEX: // -Y
+      return { u: corner[0], v: 1 - corner[2] };
+    case 4: // +Z
+      return { u: corner[0], v: corner[1] };
+    case 5: // -Z
+      return { u: 1 - corner[0], v: corner[1] };
+    default:
+      return { u: corner[0], v: corner[1] };
+  }
+}
+
+function getFaceResolution(blockType, faceIndex) {
+  if (blockType === BLOCK_TYPES.grass && faceIndex === TOP_FACE_INDEX) return 8;
+  if (blockType === BLOCK_TYPES.wood && (faceIndex === TOP_FACE_INDEX || faceIndex === BOTTOM_FACE_INDEX)) return 8;
+  if (blockType === BLOCK_TYPES.leaves) return 5;
+  if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) return 6;
+  return 6;
+}
+
+function interpolateCorner(origin, uAxis, vAxis, u, v) {
   return [
-    clamp01(base[0] + noise),
-    clamp01(base[1] + noise),
-    clamp01(base[2] + noise),
+    origin[0] + uAxis[0] * u + vAxis[0] * v,
+    origin[1] + uAxis[1] * u + vAxis[1] * v,
+    origin[2] + uAxis[2] * u + vAxis[2] * v,
   ];
 }
 
-function tintForFace(blockType, baseColor, shade, world, worldX, worldY, worldZ, faceIndex, cornerIndex) {
-  let color = baseColor;
-  if (blockType === BLOCK_TYPES.grass && faceIndex !== 3) {
-    const tint = 0.07;
-    color = [baseColor[0] + tint, baseColor[1] + tint, baseColor[2] + tint];
+function applyTextureDetail(blockType, baseColor, faceIndex, corner, world, worldX, worldY, worldZ) {
+  const { u, v } = computeFaceUV(faceIndex, corner);
+  const pixelU = Math.max(0, Math.min(15, Math.floor(u * 16)));
+  const pixelV = Math.max(0, Math.min(15, Math.floor(v * 16)));
+  const worldCornerX = worldX + corner[0];
+  const worldCornerY = worldY + corner[1];
+  const worldCornerZ = worldZ + corner[2];
+  const isSideFace = faceIndex === 0 || faceIndex === 1 || faceIndex === 4 || faceIndex === 5;
+
+  const pixelNoise = (salt = 0) => world.pseudoRandom(
+    Math.floor(worldCornerX) * 101 + pixelU * 13 + salt * 17,
+    Math.floor(worldCornerY) * 131 + pixelV * 11 + salt * 19,
+    Math.floor(worldCornerZ) * 151 + faceIndex * 7 + salt * 23,
+    salt + blockType * 31,
+  );
+
+  let color = [...baseColor];
+
+  switch (blockType) {
+    case BLOCK_TYPES.grass: {
+      const topShadow = [0.24, 0.47, 0.16];
+      const topBase = [0.36, 0.66, 0.24];
+      const topHighlight = [0.58, 0.86, 0.37];
+      if (faceIndex === TOP_FACE_INDEX) {
+        const tuft = pixelNoise(10);
+        const patch = pixelNoise(11);
+        const sparkle = pixelNoise(12);
+        let blend = clamp01(0.25 + tuft * 0.6);
+        let grassTop = mixColor(topShadow, topHighlight, blend);
+        if (patch > 0.78) grassTop = mixColor(grassTop, topHighlight, 0.4);
+        if (patch < 0.18) grassTop = mixColor(grassTop, topShadow, 0.6);
+        grassTop[0] = clamp01(grassTop[0] + (sparkle - 0.5) * 0.06);
+        grassTop[1] = clamp01(grassTop[1] + (sparkle - 0.5) * 0.08);
+        return grassTop;
+      }
+      const dirtDark = [0.33, 0.23, 0.13];
+      const dirtLight = [0.61, 0.45, 0.26];
+      if (faceIndex === BOTTOM_FACE_INDEX) {
+        const soilBlend = clamp01(0.4 + pixelNoise(18) * 0.5);
+        return mixColor(dirtDark, dirtLight, soilBlend);
+      }
+      if (isSideFace) {
+        const topThreshold = 11 + Math.floor((pixelNoise(20) - 0.5) * 3);
+        if (pixelV >= topThreshold) {
+          const tuft = pixelNoise(22);
+          const border = pixelNoise(pixelU + 31);
+          let sideGrass = mixColor(topBase, topHighlight, clamp01(0.4 + tuft * 0.5));
+          sideGrass[1] = clamp01(sideGrass[1] + (border - 0.5) * 0.1);
+          return sideGrass;
+        }
+        const soilBlend = clamp01(0.25 + pixelNoise(24) * 0.65);
+        let soil = mixColor(dirtDark, dirtLight, soilBlend);
+        if (pixelNoise(25) > 0.85) soil = mixColor(soil, dirtDark, 0.7);
+        if (pixelNoise(26) < 0.08) soil = mixColor(soil, [0.68, 0.52, 0.32], 0.4);
+        soil[1] = clamp01(soil[1] + (pixelNoise(pixelV + 28) - 0.5) * 0.05);
+        return soil;
+      }
+      return baseColor;
+    }
+    case BLOCK_TYPES.dirt: {
+      const soilDark = [0.32, 0.21, 0.12];
+      const soilLight = [0.63, 0.46, 0.31];
+      const blend = clamp01(0.3 + pixelNoise(40) * 0.7);
+      let soil = mixColor(soilDark, soilLight, blend);
+      if (pixelNoise(41) > 0.82) soil = mixColor(soil, [0.7, 0.54, 0.35], 0.4);
+      if (pixelNoise(42) < 0.12) soil = mixColor(soil, [0.26, 0.18, 0.1], 0.6);
+      soil[1] = clamp01(soil[1] + (pixelNoise(43) - 0.5) * 0.04);
+      return soil;
+    }
+    case BLOCK_TYPES.stone: {
+      const stoneDark = [0.34, 0.35, 0.4];
+      const stoneMid = [0.58, 0.6, 0.66];
+      const stoneLight = [0.78, 0.8, 0.85];
+      let stone = mixColor(stoneDark, stoneMid, pixelNoise(60));
+      const fleck = pixelNoise(61);
+      if (fleck > 0.82) stone = mixColor(stone, stoneLight, 0.6);
+      if (fleck < 0.18) stone = mixColor(stone, stoneDark, 0.7);
+      if ((pixelU % 5 === 0 || pixelV % 4 === 0) && pixelNoise(62) > 0.68) {
+        stone = mixColor(stone, stoneDark, 0.8);
+      }
+      stone = stone.map((c) => clamp01(c + (pixelNoise(63) - 0.5) * 0.05));
+      return stone;
+    }
+    case BLOCK_TYPES.sand: {
+      const sandShadow = [0.86, 0.78, 0.57];
+      const sandLight = [0.97, 0.91, 0.71];
+      let sand = mixColor(sandShadow, sandLight, clamp01(0.35 + pixelNoise(80) * 0.65));
+      const ripple = Math.sin((worldCornerX + worldCornerZ) * 4.5 + pixelV * 0.8 + faceIndex * 2);
+      sand = sand.map((c, idx) => clamp01(c + ripple * (idx === 1 ? 0.035 : 0.025)));
+      if (pixelNoise(81) > 0.88) sand = mixColor(sand, sandLight, 0.5);
+      if (pixelNoise(82) < 0.08) sand = mixColor(sand, sandShadow, 0.4);
+      return sand;
+    }
+    case BLOCK_TYPES.wood: {
+      const barkDark = [0.32, 0.2, 0.1];
+      const barkLight = [0.65, 0.46, 0.24];
+      const heartwood = [0.69, 0.52, 0.28];
+      if (faceIndex === TOP_FACE_INDEX || faceIndex === BOTTOM_FACE_INDEX) {
+        const dx = corner[0] - 0.5;
+        const dz = corner[2] - 0.5;
+        const radius = Math.sqrt(dx * dx + dz * dz);
+        const ring = Math.sin(radius * 22 + worldX * 0.4 + worldZ * 0.4);
+        let wood = mixColor(heartwood, barkLight, clamp01(0.45 + ring * 0.45));
+        const core = Math.exp(-radius * 7);
+        wood = wood.map((c, idx) => clamp01(c + core * (idx === 1 ? 0.05 : 0.02)));
+        if (pixelNoise(100) > 0.86) wood = mixColor(wood, barkDark, 0.5);
+        return wood;
+      }
+      const stripe = pixelU % 4;
+      let wood = stripe === 0 || stripe === 3 ? barkDark.slice() : barkLight.slice();
+      const grain = Math.sin((worldCornerY + worldCornerZ) * 6 + pixelU * 0.7);
+      wood = wood.map((c, idx) => clamp01(c + grain * (idx === 1 ? 0.05 : 0.03)));
+      if (pixelNoise(101) > 0.82) wood = mixColor(wood, [0.24, 0.14, 0.07], 0.6);
+      if (pixelNoise(102) < 0.1) wood = mixColor(wood, barkLight, 0.4);
+      return wood;
+    }
+    case BLOCK_TYPES.leaves: {
+      const leafDark = [0.14, 0.35, 0.1];
+      const leafLight = [0.54, 0.8, 0.32];
+      let leaf = mixColor(leafDark, baseColor, clamp01(0.3 + pixelNoise(120) * 0.6));
+      if (pixelNoise(121) > 0.85) leaf = mixColor(leaf, leafLight, 0.5);
+      if (pixelNoise(122) < 0.1) leaf = mixColor(leaf, leafDark, 0.7);
+      const translucency = Math.max(0, Math.sin((worldCornerX + worldCornerY + worldCornerZ) * 0.8));
+      leaf[1] = clamp01(leaf[1] + translucency * 0.08);
+      return leaf;
+    }
+    case BLOCK_TYPES.gold: {
+      const goldBase = [0.83, 0.63, 0.2];
+      const goldBright = [1, 0.94, 0.55];
+      let gold = mixColor(goldBase, goldBright, clamp01(0.4 + pixelNoise(140) * 0.6));
+      if (pixelNoise(141) > 0.86) gold = mixColor(gold, goldBright, 0.7);
+      if ((pixelU % 6 === 0 || pixelV % 6 === 0) && pixelNoise(142) > 0.7) {
+        gold = mixColor(gold, [0.96, 0.78, 0.3], 0.5);
+      }
+      return gold;
+    }
+    case BLOCK_TYPES.diamond: {
+      const diamondBase = [0.45, 0.78, 0.86];
+      const diamondBright = [0.82, 0.97, 1];
+      let diamond = mixColor(diamondBase, diamondBright, clamp01(0.45 + pixelNoise(160) * 0.55));
+      if (pixelNoise(161) > 0.84) diamond = mixColor(diamond, [0.9, 1, 1], 0.6);
+      if (pixelNoise(162) < 0.18) diamond = mixColor(diamond, [0.32, 0.65, 0.75], 0.5);
+      return diamond;
+    }
+    default:
+      return color;
   }
-  if (blockType === BLOCK_TYPES.wood && (faceIndex === 2 || faceIndex === 3)) {
-    color = [0.62, 0.45, 0.23];
-  }
-  if (blockType === BLOCK_TYPES.leaves) {
-    const leafNoise = (world.random3D(worldX, worldY, worldZ, faceIndex * 11 + cornerIndex) - 0.5) * 0.2;
-    color = addColorNoise(color, leafNoise);
-  }
+}
+
+function sampleFaceColor(blockType, baseColor, shade, world, worldX, worldY, worldZ, faceIndex, corner) {
+  const detailColor = applyTextureDetail(blockType, baseColor, faceIndex, corner, world, worldX, worldY, worldZ);
+  const { u, v } = computeFaceUV(faceIndex, corner);
+
+  let color = detailColor;
   if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) {
-    const sparkle = Math.abs(Math.sin(worldX * 0.3 + worldZ * 0.7 + faceIndex)) * 0.15;
-    color = [color[0] + sparkle, color[1] + sparkle * (blockType === BLOCK_TYPES.gold ? 1 : 1.2), color[2] + sparkle];
+    const sparkleBase = world.pseudoRandom(
+      Math.floor(worldX) * 59 + Math.floor(worldY) * 83 + Math.floor(worldZ) * 97,
+      Math.floor(u * 16) * 13,
+      Math.floor(v * 16) * 17,
+      200 + blockType * 7,
+    );
+    const sparkleWave = Math.abs(Math.sin((worldX + u) * 2.4 + (worldZ + v) * 1.7 + faceIndex));
+    const sparkle = clamp01((sparkleBase - 0.7) * 1.5 + sparkleWave * 0.3);
+    const highlight = blockType === BLOCK_TYPES.gold ? [1, 0.97, 0.7] : [0.9, 0.98, 1];
+    color = mixColor(color, highlight, sparkle * 0.5);
   }
 
-  const noise = (world.random3D(worldX, worldY, worldZ, faceIndex * 17 + cornerIndex) - 0.5) * 0.08;
-  const shaded = shade + noise;
+  const shadeNoise = (world.random3D(
+    worldX + corner[0],
+    worldY + corner[1],
+    worldZ + corner[2],
+    faceIndex * 29 + Math.floor(u * 11) + Math.floor(v * 13),
+  ) - 0.5) * 0.12;
+  const finalShade = shade + shadeNoise;
   return [
-    clamp01(color[0] * shaded),
-    clamp01(color[1] * shaded),
-    clamp01(color[2] * shaded),
+    clamp01(color[0] * finalShade),
+    clamp01(color[1] * finalShade),
+    clamp01(color[2] * finalShade),
   ];
+}
+
+function emitDetailedFace(
+  positions,
+  normals,
+  colors,
+  blockType,
+  baseColor,
+  faceIndex,
+  face,
+  world,
+  worldX,
+  worldY,
+  worldZ,
+  lx,
+  y,
+  lz,
+) {
+  const resolution = Math.max(1, getFaceResolution(blockType, faceIndex));
+  const { origin, uAxis, vAxis } = FACE_AXES[faceIndex];
+  const triangleOrder = [0, 1, 2, 0, 2, 3];
+
+  for (let iu = 0; iu < resolution; iu += 1) {
+    const u0 = iu / resolution;
+    const u1 = (iu + 1) / resolution;
+    for (let iv = 0; iv < resolution; iv += 1) {
+      const v0 = iv / resolution;
+      const v1 = (iv + 1) / resolution;
+
+      const quadCorners = [
+        interpolateCorner(origin, uAxis, vAxis, u0, v0),
+        interpolateCorner(origin, uAxis, vAxis, u0, v1),
+        interpolateCorner(origin, uAxis, vAxis, u1, v1),
+        interpolateCorner(origin, uAxis, vAxis, u1, v0),
+      ];
+
+      for (const idx of triangleOrder) {
+        const corner = quadCorners[idx];
+        positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
+        normals.push(face.dir[0], face.dir[1], face.dir[2]);
+        const tinted = sampleFaceColor(blockType, baseColor, face.shade ?? 1, world, worldX, worldY, worldZ, faceIndex, corner);
+        colors.push(tinted[0], tinted[1], tinted[2]);
+      }
+    }
+  }
 }
 
 const chunkKey = (cx, cz) => `${cx},${cz}`;
@@ -412,15 +658,22 @@ class Chunk {
             if (isTransparentBlock(neighborType)) neighborType = BLOCK_TYPES.air;
             if (neighborType !== BLOCK_TYPES.air) continue;
 
-            const shade = face.shade ?? 1;
-            for (let tri = 0; tri < TRIANGLE_INDICES.length; tri += 1) {
-              const cornerIndex = TRIANGLE_INDICES[tri];
-              const corner = face.corners[cornerIndex];
-              positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
-              normals.push(face.dir[0], face.dir[1], face.dir[2]);
-              const tinted = tintForFace(blockType, color, shade, this.world, worldX, worldY, worldZ, faceIndex, cornerIndex);
-              colors.push(tinted[0], tinted[1], tinted[2]);
-            }
+            emitDetailedFace(
+              positions,
+              normals,
+              colors,
+              blockType,
+              color,
+              faceIndex,
+              face,
+              this.world,
+              worldX,
+              worldY,
+              worldZ,
+              lx,
+              y,
+              lz,
+            );
           }
         }
       }

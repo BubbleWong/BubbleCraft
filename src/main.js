@@ -52,6 +52,7 @@ let maxClimbHeight = MAX_STEP_HEIGHT;
 let wasGroundedPrevious = true;
 let takeoffGroundHeight = 0;
 const lastSafePosition = new THREE.Vector3();
+let lastCrosshairVisible = false;
 
 overlay.addEventListener('click', () => {
   if (loadingInProgress) return;
@@ -408,6 +409,7 @@ function animate() {
     fpsAccumulatorTime = 0;
     fpsFrameCount = 0;
   }
+  updateCrosshairVisibility();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -499,7 +501,10 @@ function setLoadingProgress(progress) {
 function updateCrosshairVisibility() {
   if (!crosshair) return;
   const shouldShow = worldReady && controls.isLocked;
-  crosshair.classList.toggle('hidden', !shouldShow);
+  if (shouldShow !== lastCrosshairVisible) {
+    crosshair.classList.toggle('hidden', !shouldShow);
+    lastCrosshairVisible = shouldShow;
+  }
 }
 
 function updateHUD() {

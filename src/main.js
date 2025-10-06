@@ -43,7 +43,6 @@ let worldReady = false;
 let loadingInProgress = false;
 
 if (hud) hud.classList.add('hidden');
-if (fpsHud) fpsHud.classList.add('hidden');
 
 let spawn = new THREE.Vector3();
 let currentGroundHeight = 0;
@@ -467,7 +466,6 @@ function finalizeWorldLoad() {
   wasGroundedPrevious = true;
   worldReady = true;
   if (hud) hud.classList.remove('hidden');
-  if (fpsHud) fpsHud.classList.remove('hidden');
   hudAccumulator = 0;
   updateHUD();
   updateFPSHud(0);

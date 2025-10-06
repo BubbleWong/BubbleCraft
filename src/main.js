@@ -42,6 +42,9 @@ const HEAD_BUFFER = 0.1;
 let worldReady = false;
 let loadingInProgress = false;
 
+if (hud) hud.classList.add('hidden');
+if (fpsHud) fpsHud.classList.add('hidden');
+
 let spawn = new THREE.Vector3();
 let currentGroundHeight = 0;
 let maxClimbHeight = MAX_STEP_HEIGHT;
@@ -463,6 +466,8 @@ function finalizeWorldLoad() {
   maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
   wasGroundedPrevious = true;
   worldReady = true;
+  if (hud) hud.classList.remove('hidden');
+  if (fpsHud) fpsHud.classList.remove('hidden');
   hudAccumulator = 0;
   updateHUD();
   updateFPSHud(0);
@@ -490,7 +495,7 @@ function setLoadingProgress(progress) {
 function updateHUD() {
   if (!hud) return;
   if (!worldReady) {
-    hud.innerHTML = '<div>Loading world…</div>';
+    hud.innerHTML = '';
     return;
   }
   const pos = controls.getObject().position;

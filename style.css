@@ -33,6 +33,11 @@ canvas#game {
   min-width: 12rem;
 }
 
+.hud.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .hud--top-right {
   left: auto;
   right: 1rem;

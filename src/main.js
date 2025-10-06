@@ -452,8 +452,14 @@ async function startWorldLoading() {
   if (loadingLabel) loadingLabel.textContent = 'Loading world…';
   controls.lock();
   try {
-    await world.generateAsync(2, (progress) => setLoadingProgress(progress));
+    await world.generateAsync(1, (progress) => setLoadingProgress(progress * 0.75));
     finalizeWorldLoad();
+    setLoadingProgress(0.85);
+    void world.generateAsync(2, (progress) => {
+      // scale progress to remaining 15%
+      const blended = 0.85 + progress * 0.15;
+      setLoadingProgress(blended);
+    });
     setLoadingProgress(1);
     hideLoadingOverlay();
     if (controls.isLocked) {

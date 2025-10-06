@@ -5,6 +5,7 @@ import { World, BLOCK_TYPES, CHUNK_HEIGHT, BLOCK_TYPE_LABELS } from './world.js'
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
 const hud = document.getElementById('hud');
+const fpsHud = document.getElementById('hud-fps');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -154,6 +155,11 @@ document.addEventListener('contextmenu', (event) => {
 
 const clock = new THREE.Clock();
 let hudAccumulator = 0;
+let fpsAccumulatorTime = 0;
+let fpsFrameCount = 0;
+let fpsSmoothed = 0;
+const FPS_UPDATE_INTERVAL = 0.25;
+const FPS_SMOOTH_FACTOR = 0.7;
 
 function highestGroundUnder(position, maxY = position.y) {
   let highest = -Infinity;
@@ -361,12 +367,21 @@ function updatePhysics(delta) {
 }
 
 function animate() {
-  const delta = Math.min(0.05, clock.getDelta());
+  const frameDelta = clock.getDelta();
+  const delta = Math.min(0.05, frameDelta);
   updatePhysics(delta);
   hudAccumulator += delta;
   if (hudAccumulator >= 0.2) {
     updateHUD();
     hudAccumulator = 0;
+  }
+  fpsAccumulatorTime += frameDelta;
+  fpsFrameCount += 1;
+  if (fpsAccumulatorTime >= FPS_UPDATE_INTERVAL) {
+    const instantaneous = fpsFrameCount / fpsAccumulatorTime;
+    updateFPSHud(instantaneous);
+    fpsAccumulatorTime = 0;
+    fpsFrameCount = 0;
   }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
@@ -374,6 +389,7 @@ function animate() {
 
 animate();
 updateHUD();
+updateFPSHud(0);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -399,4 +415,12 @@ function updateHUD() {
   lines.push(`Types: ${typeCount}`);
   lines.push(...blockLines);
   hud.innerHTML = lines.map((text) => `<div>${text}</div>`).join('');
+}
+
+function updateFPSHud(fps) {
+  if (!fpsHud) return;
+  const clamped = Number.isFinite(fps) ? fps : 0;
+  fpsSmoothed = fpsSmoothed === 0 ? clamped : fpsSmoothed * FPS_SMOOTH_FACTOR + clamped * (1 - FPS_SMOOTH_FACTOR);
+  const display = fpsSmoothed < 0 ? 0 : fpsSmoothed;
+  fpsHud.textContent = `FPS: ${display.toFixed(1)}`;
 }

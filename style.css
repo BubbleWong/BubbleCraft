@@ -33,6 +33,13 @@ canvas#game {
   min-width: 12rem;
 }
 
+.hud--top-right {
+  left: auto;
+  right: 1rem;
+  text-align: right;
+  min-width: auto;
+}
+
 .crosshair {
   position: fixed;
   top: 50%;

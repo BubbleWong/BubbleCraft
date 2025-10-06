@@ -342,13 +342,14 @@ function chunkTasksInSpiral(radius) {
   }
 
   tasks.sort((a, b) => {
-    const da = Math.max(Math.abs(a.cx), Math.abs(a.cz));
-    const db = Math.max(Math.abs(b.cx), Math.abs(b.cz));
+    const da = a.cx * a.cx + a.cz * a.cz;
+    const db = b.cx * b.cx + b.cz * b.cz;
     if (da !== db) return da - db;
-    if (da === 0) return 0;
-    const angleA = Math.atan2(a.cz, a.cx);
-    const angleB = Math.atan2(b.cz, b.cx);
-    return angleA - angleB;
+    const ma = Math.abs(a.cx) + Math.abs(a.cz);
+    const mb = Math.abs(b.cx) + Math.abs(b.cz);
+    if (ma !== mb) return ma - mb;
+    if (a.cx !== b.cx) return a.cx - b.cx;
+    return a.cz - b.cz;
   });
 
   return tasks;

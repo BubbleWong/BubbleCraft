@@ -1,55 +1,17 @@
 import * as THREE from './vendor/three.module.js';
 import { ImprovedNoise } from './vendor/ImprovedNoise.js';
-
-const CHUNK_SIZE = 16;
-const CHUNK_HEIGHT = 64;
-const BLOCK_TYPES = {
-  air: 0,
-  grass: 1,
-  dirt: 2,
-  stone: 3,
-  sand: 4,
-  wood: 5,
-  leaves: 6,
-  gold: 7,
-  diamond: 8,
-  flowerRed: 9,
-  flowerYellow: 10,
-};
+import {
+  CHUNK_SIZE,
+  CHUNK_HEIGHT,
+  BLOCK_TYPES,
+  BLOCK_TYPE_LABELS,
+  BLOCK_COLORS,
+  FLOWER_PETAL_COLORS,
+  FLOWER_CENTER_COLOR,
+  FLOWER_STEM_COLOR,
+} from './constants.js';
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
-
-const BLOCK_TYPE_LABELS = {
-  [BLOCK_TYPES.grass]: 'Grass',
-  [BLOCK_TYPES.dirt]: 'Dirt',
-  [BLOCK_TYPES.stone]: 'Stone',
-  [BLOCK_TYPES.sand]: 'Sand',
-  [BLOCK_TYPES.wood]: 'Wood',
-  [BLOCK_TYPES.leaves]: 'Leaves',
-  [BLOCK_TYPES.gold]: 'Gold',
-  [BLOCK_TYPES.diamond]: 'Diamond',
-  [BLOCK_TYPES.flowerRed]: 'Flower (Red)',
-  [BLOCK_TYPES.flowerYellow]: 'Flower (Yellow)',
-};
-
-const BLOCK_COLORS = {
-  [BLOCK_TYPES.grass]: [0.49, 0.74, 0.35],
-  [BLOCK_TYPES.dirt]: [0.58, 0.41, 0.29],
-  [BLOCK_TYPES.stone]: [0.65, 0.65, 0.7],
-  [BLOCK_TYPES.sand]: [0.93, 0.87, 0.63],
-  [BLOCK_TYPES.wood]: [0.54, 0.35, 0.19],
-  [BLOCK_TYPES.leaves]: [0.29, 0.62, 0.28],
-  [BLOCK_TYPES.gold]: [0.97, 0.83, 0.36],
-  [BLOCK_TYPES.diamond]: [0.53, 0.84, 0.92],
-};
-
-const FLOWER_PETAL_COLORS = {
-  [BLOCK_TYPES.flowerRed]: [0.9, 0.25, 0.32],
-  [BLOCK_TYPES.flowerYellow]: [0.98, 0.88, 0.38],
-};
-
-const FLOWER_CENTER_COLOR = [0.98, 0.94, 0.62];
-const FLOWER_STEM_COLOR = [0.25, 0.65, 0.38];
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const isTransparentBlock = (blockType) =>
@@ -381,6 +343,7 @@ class Chunk {
     this.mesh = null;
     this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
+    this.geometryVersion = 0;
   }
 
   index(x, y, z) {
@@ -558,177 +521,15 @@ class Chunk {
     }
   }
 
-  addCross(positions, normals, colors, centerX, centerZ, bottomY, topY, halfWidth, faceColor) {
-    const quads = [
-      {
-        corners: [
-          [centerX - halfWidth, bottomY, centerZ],
-          [centerX + halfWidth, bottomY, centerZ],
-          [centerX + halfWidth, topY, centerZ],
-          [centerX - halfWidth, topY, centerZ],
-        ],
-        normal: [0, 0, 1],
-      },
-      {
-        corners: [
-          [centerX, bottomY, centerZ - halfWidth],
-          [centerX, bottomY, centerZ + halfWidth],
-          [centerX, topY, centerZ + halfWidth],
-          [centerX, topY, centerZ - halfWidth],
-        ],
-        normal: [1, 0, 0],
-      },
-    ];
-    const frontOrder = [0, 1, 2, 0, 2, 3];
-    const backOrder = [0, 2, 1, 0, 3, 2];
-    for (const quad of quads) {
-      const { corners, normal } = quad;
-      for (const indices of [frontOrder, backOrder]) {
-        const usedNormal = indices === frontOrder ? normal : normal.map((n) => -n);
-        for (const idx of indices) {
-          const vertex = corners[idx];
-          positions.push(vertex[0], vertex[1], vertex[2]);
-          normals.push(usedNormal[0], usedNormal[1], usedNormal[2]);
-          colors.push(faceColor[0], faceColor[1], faceColor[2]);
-        }
-      }
-    }
-  }
-
-  addFlowerGeometry(positions, normals, colors, lx, y, lz, blockType) {
-    const centerX = lx + 0.5;
-    const centerZ = lz + 0.5;
-    const stemBottom = y;
-    const stemTop = y + 0.45;
-    const petalBottom = y + 0.4;
-    const petalTop = y + 0.95;
-
-    const stemHalf = 0.05;
-    const petalHalf = 0.32;
-    const petalColor = FLOWER_PETAL_COLORS[blockType] ?? [1, 1, 1];
-
-    this.addCross(positions, normals, colors, centerX, centerZ, stemBottom, stemTop, stemHalf, FLOWER_STEM_COLOR);
-    this.addCross(positions, normals, colors, centerX, centerZ, petalBottom, petalTop, petalHalf, petalColor);
-
-    const centerRadius = 0.12;
-    const centerBottom = petalTop - 0.25;
-    const centerTop = petalTop;
-    const quads = [
-      {
-        corners: [
-          [centerX - centerRadius, centerBottom, centerZ],
-          [centerX + centerRadius, centerBottom, centerZ],
-          [centerX + centerRadius, centerTop, centerZ],
-          [centerX - centerRadius, centerTop, centerZ],
-        ],
-        normal: [0, 0, 1],
-      },
-      {
-        corners: [
-          [centerX, centerBottom, centerZ - centerRadius],
-          [centerX, centerBottom, centerZ + centerRadius],
-          [centerX, centerTop, centerZ + centerRadius],
-          [centerX, centerTop, centerZ - centerRadius],
-        ],
-        normal: [1, 0, 0],
-      },
-    ];
-    const frontOrder = [0, 1, 2, 0, 2, 3];
-    const backOrder = [0, 2, 1, 0, 3, 2];
-    for (const quad of quads) {
-      const { corners, normal } = quad;
-      for (const indices of [frontOrder, backOrder]) {
-        const usedNormal = indices === frontOrder ? normal : normal.map((n) => -n);
-        for (const idx of indices) {
-          const vertex = corners[idx];
-          positions.push(vertex[0], vertex[1], vertex[2]);
-          normals.push(usedNormal[0], usedNormal[1], usedNormal[2]);
-          colors.push(FLOWER_CENTER_COLOR[0], FLOWER_CENTER_COLOR[1], FLOWER_CENTER_COLOR[2]);
-        }
-      }
-    }
-  }
-
-  buildMesh() {
-    const positions = [];
-    const normals = [];
-    const colors = [];
-
-    for (let lx = 0; lx < CHUNK_SIZE; lx += 1) {
-      for (let y = 0; y < CHUNK_HEIGHT; y += 1) {
-        for (let lz = 0; lz < CHUNK_SIZE; lz += 1) {
-          const blockType = this.get(lx, y, lz);
-          if (blockType === BLOCK_TYPES.air) continue;
-
-          const color = BLOCK_COLORS[blockType];
-          if (!color && blockType !== BLOCK_TYPES.flowerRed && blockType !== BLOCK_TYPES.flowerYellow) continue;
-
-          if (blockType === BLOCK_TYPES.flowerRed || blockType === BLOCK_TYPES.flowerYellow) {
-            this.addFlowerGeometry(positions, normals, colors, lx, y, lz, blockType);
-            continue;
-          }
-
-          const worldX = this.origin.x + lx;
-          const worldY = y;
-          const worldZ = this.origin.z + lz;
-
-          for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
-            const face = FACE_DEFS[faceIndex];
-            let neighborType = this.world.getBlock(worldX + face.dir[0], worldY + face.dir[1], worldZ + face.dir[2]);
-            if (isTransparentBlock(neighborType)) neighborType = BLOCK_TYPES.air;
-            if (neighborType !== BLOCK_TYPES.air) continue;
-
-            emitDetailedFace(
-              positions,
-              normals,
-              colors,
-              blockType,
-              color,
-              faceIndex,
-              face,
-              this.world,
-              worldX,
-              worldY,
-              worldZ,
-              lx,
-              y,
-              lz,
-            );
-          }
-        }
-      }
-    }
-
-    if (positions.length === 0) {
-      return null;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.computeBoundingSphere();
-
-    const mesh = new THREE.Mesh(geometry, this.world.material);
-    mesh.position.copy(this.origin);
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    mesh.userData.chunk = this;
-    return mesh;
-  }
-
   rebuild() {
     if (this.mesh) {
       this.world.scene.remove(this.mesh);
       this.world.chunkMeshes.delete(this.mesh);
       this.mesh.geometry.dispose();
     }
-    const nextMesh = this.buildMesh();
-    this.mesh = nextMesh;
-    if (nextMesh) {
-      this.world.scene.add(nextMesh);
-      this.world.chunkMeshes.add(nextMesh);
-    }
+    this.mesh = null;
+    this.geometryVersion += 1;
+    this.world.requestChunkGeometry(this, this.geometryVersion);
   }
 }
 
@@ -741,6 +542,18 @@ export class World {
     this.noise = new ImprovedNoise();
     this.seed = Math.floor(Math.random() * 2 ** 31);
     this.blockTotals = new Uint32Array(MAX_BLOCK_TYPE + 1);
+    this.workerTaskId = 0;
+    this.workerTasks = new Map();
+    try {
+      this.worker = new Worker(new URL('./worker/chunkGeometryWorker.js', import.meta.url), { type: 'module' });
+      this.worker.addEventListener('message', (event) => this.handleWorkerMessage(event));
+      this.worker.addEventListener('error', (event) => {
+        console.error('Chunk geometry worker error', event);
+      });
+    } catch (error) {
+      console.error('Failed to initialize chunk geometry worker', error);
+      this.worker = null;
+    }
   }
 
   pseudoRandom(x, y, z, salt = 0) {
@@ -847,6 +660,78 @@ export class World {
         await new Promise((resolve) => requestAnimationFrame(resolve));
       }
     }
+  }
+
+  requestChunkGeometry(chunk, version) {
+    if (!this.worker) return;
+    const blocksCopy = chunk.blocks.slice();
+    const neighbors = {};
+    const transfers = [blocksCopy.buffer];
+    const neighborSpecs = [
+      ['px', 1, 0],
+      ['nx', -1, 0],
+      ['pz', 0, 1],
+      ['nz', 0, -1],
+    ];
+    for (const [key, dx, dz] of neighborSpecs) {
+      const neighbor = this.getChunk(chunk.cx + dx, chunk.cz + dz);
+      if (neighbor) {
+        const neighborCopy = neighbor.blocks.slice();
+        neighbors[key] = { blocks: neighborCopy.buffer };
+        transfers.push(neighborCopy.buffer);
+      }
+    }
+
+    const id = ++this.workerTaskId;
+    this.workerTasks.set(id, { chunk, version });
+    this.worker.postMessage(
+      {
+        id,
+        version,
+        payload: {
+          seed: this.seed,
+          origin: [chunk.origin.x, chunk.origin.y, chunk.origin.z],
+          blocks: blocksCopy.buffer,
+          neighbors,
+        },
+      },
+      transfers,
+    );
+  }
+
+  handleWorkerMessage(event) {
+    const { id, version, positions, normals, colors, error } = event.data;
+    const task = this.workerTasks.get(id);
+    if (!task) return;
+    this.workerTasks.delete(id);
+    const { chunk } = task;
+    if (version !== chunk.geometryVersion) {
+      // Outdated result; drop it.
+      return;
+    }
+    if (error) {
+      console.error('Chunk geometry worker message error:', error);
+      return;
+    }
+    if (!positions || positions.length === 0) {
+      chunk.mesh = null;
+      return;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeBoundingSphere();
+
+    const mesh = new THREE.Mesh(geometry, this.material);
+    mesh.position.copy(chunk.origin);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.userData.chunk = chunk;
+    chunk.mesh = mesh;
+    this.scene.add(mesh);
+    this.chunkMeshes.add(mesh);
   }
 
   applyChunkCounts(chunk, delta) {

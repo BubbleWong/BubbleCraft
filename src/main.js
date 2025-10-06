@@ -10,6 +10,7 @@ const loadingOverlay = document.getElementById('loading');
 const loadingLabel = document.getElementById('loading-label');
 const loadingBar = document.getElementById('loading-bar');
 const loadingPercent = document.getElementById('loading-percent');
+const crosshair = document.getElementById('crosshair');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -43,6 +44,7 @@ let worldReady = false;
 let loadingInProgress = false;
 
 if (hud) hud.classList.add('hidden');
+if (crosshair) crosshair.classList.add('hidden');
 
 let spawn = new THREE.Vector3();
 let currentGroundHeight = 0;
@@ -64,11 +66,13 @@ controls.addEventListener('lock', () => {
   if (worldReady) {
     overlay.classList.add('hidden');
   }
+  updateCrosshairVisibility();
 });
 
 controls.addEventListener('unlock', () => {
   if (loadingInProgress) return;
   overlay.classList.remove('hidden');
+  updateCrosshairVisibility();
 });
 
 const keyState = {
@@ -453,6 +457,7 @@ function handleWorldLoadError() {
   overlay.classList.remove('hidden');
   worldReady = false;
   if (loadingLabel) loadingLabel.textContent = 'Failed to load world. Click to retry.';
+  updateCrosshairVisibility();
 }
 
 function finalizeWorldLoad() {
@@ -469,6 +474,7 @@ function finalizeWorldLoad() {
   hudAccumulator = 0;
   updateHUD();
   updateFPSHud(0);
+  updateCrosshairVisibility();
 }
 
 function showLoadingOverlay() {
@@ -488,6 +494,12 @@ function setLoadingProgress(progress) {
   const clamped = Math.max(0, Math.min(1, progress));
   loadingBar.style.width = `${(clamped * 100).toFixed(1)}%`;
   loadingPercent.textContent = `${Math.round(clamped * 100)}%`;
+}
+
+function updateCrosshairVisibility() {
+  if (!crosshair) return;
+  const shouldShow = worldReady && controls.isLocked;
+  crosshair.classList.toggle('hidden', !shouldShow);
 }
 
 function updateHUD() {

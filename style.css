@@ -115,6 +115,10 @@ canvas#game {
   z-index: 9;
 }
 
+.crosshair.hidden {
+  opacity: 0;
+}
+
 .crosshair::before,
 .crosshair::after {
   content: "";

@@ -39,6 +39,8 @@ const MAX_JUMP_CLEARANCE = 0.1;
 const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
+const KEYBOARD_LOOK_YAW_SPEED = THREE.MathUtils.degToRad(150);
+const KEYBOARD_LOOK_PITCH_SPEED = THREE.MathUtils.degToRad(110);
 
 let worldReady = false;
 let loadingInProgress = false;
@@ -82,6 +84,10 @@ const keyState = {
   left: false,
   right: false,
   sprint: false,
+  lookUp: false,
+  lookDown: false,
+  lookLeft: false,
+  lookRight: false,
 };
 let canJump = false;
 const velocity = new THREE.Vector3(0, 0, 0);
@@ -107,24 +113,32 @@ const SAMPLE_OFFSETS = [
 function setMovementState(code, pressed) {
   switch (code) {
     case 'KeyW':
-    case 'ArrowUp':
       keyState.forward = pressed;
       break;
     case 'KeyS':
-    case 'ArrowDown':
       keyState.backward = pressed;
       break;
     case 'KeyA':
-    case 'ArrowLeft':
       keyState.left = pressed;
       break;
     case 'KeyD':
-    case 'ArrowRight':
       keyState.right = pressed;
       break;
     case 'ShiftLeft':
     case 'ShiftRight':
       keyState.sprint = pressed;
+      break;
+    case 'ArrowUp':
+      keyState.lookUp = pressed;
+      break;
+    case 'ArrowDown':
+      keyState.lookDown = pressed;
+      break;
+    case 'ArrowLeft':
+      keyState.lookLeft = pressed;
+      break;
+    case 'ArrowRight':
+      keyState.lookRight = pressed;
       break;
     case 'Space':
       if (pressed && canJump) {
@@ -137,12 +151,16 @@ function setMovementState(code, pressed) {
   }
 }
 
+const LOOK_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
 document.addEventListener('keydown', (event) => {
   if (event.repeat) return;
+  if (LOOK_KEYS.has(event.code)) event.preventDefault();
   setMovementState(event.code, true);
 });
 
 document.addEventListener('keyup', (event) => {
+  if (LOOK_KEYS.has(event.code)) event.preventDefault();
   setMovementState(event.code, false);
 });
 
@@ -395,6 +413,7 @@ function updatePhysics(delta) {
 function animate() {
   const frameDelta = clock.getDelta();
   const delta = Math.min(0.05, frameDelta);
+  applyKeyboardLook(frameDelta);
   updatePhysics(delta);
   hudAccumulator += delta;
   if (hudAccumulator >= 0.2) {
@@ -505,6 +524,36 @@ function updateCrosshairVisibility() {
     crosshair.classList.toggle('hidden', !shouldShow);
     lastCrosshairVisible = shouldShow;
   }
+}
+
+function applyKeyboardLook(delta) {
+  if (!worldReady) return;
+
+  let yaw = 0;
+  if (keyState.lookLeft) yaw += KEYBOARD_LOOK_YAW_SPEED * delta;
+  if (keyState.lookRight) yaw -= KEYBOARD_LOOK_YAW_SPEED * delta;
+
+  let pitch = 0;
+  if (keyState.lookUp) pitch += KEYBOARD_LOOK_PITCH_SPEED * delta;
+  if (keyState.lookDown) pitch -= KEYBOARD_LOOK_PITCH_SPEED * delta;
+
+  if (yaw === 0 && pitch === 0) return;
+
+  const camera = controls.getObject();
+  const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  euler.setFromQuaternion(camera.quaternion);
+
+  euler.y += yaw;
+  euler.x = clampPitch(euler.x + pitch);
+
+  camera.quaternion.setFromEuler(euler);
+}
+
+function clampPitch(nextPitch) {
+  const halfPi = Math.PI / 2;
+  const minPolar = controls.minPolarAngle ?? 0;
+  const maxPolar = controls.maxPolarAngle ?? Math.PI;
+  return Math.max(halfPi - maxPolar, Math.min(halfPi - minPolar, nextPitch));
 }
 
 function updateHUD() {

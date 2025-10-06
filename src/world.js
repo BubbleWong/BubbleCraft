@@ -333,6 +333,27 @@ function emitDetailedFace(
 
 const chunkKey = (cx, cz) => `${cx},${cz}`;
 
+function chunkTasksInSpiral(radius) {
+  const tasks = [];
+  for (let cx = -radius; cx <= radius; cx += 1) {
+    for (let cz = -radius; cz <= radius; cz += 1) {
+      tasks.push({ cx, cz });
+    }
+  }
+
+  tasks.sort((a, b) => {
+    const da = Math.max(Math.abs(a.cx), Math.abs(a.cz));
+    const db = Math.max(Math.abs(b.cx), Math.abs(b.cz));
+    if (da !== db) return da - db;
+    if (da === 0) return 0;
+    const angleA = Math.atan2(a.cz, a.cx);
+    const angleB = Math.atan2(b.cz, b.cx);
+    return angleA - angleB;
+  });
+
+  return tasks;
+}
+
 class Chunk {
   constructor(world, cx, cz) {
     this.world = world;
@@ -627,20 +648,13 @@ export class World {
   }
 
   generate(radius = 2) {
-    for (let cx = -radius; cx <= radius; cx += 1) {
-      for (let cz = -radius; cz <= radius; cz += 1) {
-        this.ensureChunk(cx, cz);
-      }
+    for (const { cx, cz } of chunkTasksInSpiral(radius)) {
+      this.ensureChunk(cx, cz);
     }
   }
 
   async generateAsync(radius = 2, onProgress = null) {
-    const tasks = [];
-    for (let cx = -radius; cx <= radius; cx += 1) {
-      for (let cz = -radius; cz <= radius; cz += 1) {
-        tasks.push([cx, cz]);
-      }
-    }
+    const tasks = chunkTasksInSpiral(radius);
 
     const total = tasks.length;
     if (total === 0) {
@@ -649,7 +663,7 @@ export class World {
     }
 
     for (let index = 0; index < total; index += 1) {
-      const [cx, cz] = tasks[index];
+      const { cx, cz } = tasks[index];
       this.ensureChunk(cx, cz);
       if (typeof onProgress === 'function') {
         onProgress((index + 1) / total);

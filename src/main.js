@@ -6,6 +6,10 @@ const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
 const hud = document.getElementById('hud');
 const fpsHud = document.getElementById('hud-fps');
+const loadingOverlay = document.getElementById('loading');
+const loadingLabel = document.getElementById('loading-label');
+const loadingBar = document.getElementById('loading-bar');
+const loadingPercent = document.getElementById('loading-percent');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -28,27 +32,42 @@ sun.position.set(60, 120, 40);
 scene.add(sun);
 
 const world = new World(scene);
-world.generate(2);
 
-const spawn = world.getSpawnPoint();
-controls.getObject().position.copy(spawn);
-controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
 const MAX_STEP_HEIGHT = 1.01;
 const MAX_JUMP_CLEARANCE = 0.1;
 const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
 
+let worldReady = false;
+let loadingInProgress = false;
 
-let currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
-let maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+let spawn = new THREE.Vector3();
+let currentGroundHeight = 0;
+let maxClimbHeight = MAX_STEP_HEIGHT;
 let wasGroundedPrevious = true;
-let takeoffGroundHeight = currentGroundHeight;
-const lastSafePosition = controls.getObject().position.clone();
+let takeoffGroundHeight = 0;
+const lastSafePosition = new THREE.Vector3();
 
-overlay.addEventListener('click', () => controls.lock());
-controls.addEventListener('lock', () => overlay.classList.add('hidden'));
-controls.addEventListener('unlock', () => overlay.classList.remove('hidden'));
+overlay.addEventListener('click', () => {
+  if (loadingInProgress) return;
+  if (worldReady) {
+    controls.lock();
+    return;
+  }
+  startWorldLoading();
+});
+
+controls.addEventListener('lock', () => {
+  if (worldReady) {
+    overlay.classList.add('hidden');
+  }
+});
+
+controls.addEventListener('unlock', () => {
+  if (loadingInProgress) return;
+  overlay.classList.remove('hidden');
+});
 
 const keyState = {
   forward: false,
@@ -231,7 +250,7 @@ function resolvePenetration(position, velocity) {
 }
 
 function updatePhysics(delta) {
-  if (!controls.isLocked) return;
+  if (!worldReady || !controls.isLocked) return;
 
   const object = controls.getObject();
   resolvePenetration(object.position, velocity);
@@ -397,8 +416,83 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+async function startWorldLoading() {
+  if (loadingInProgress) return;
+  loadingInProgress = true;
+  overlay.classList.add('hidden');
+  setLoadingProgress(0);
+  showLoadingOverlay();
+  if (loadingLabel) loadingLabel.textContent = 'Loading world…';
+  controls.lock();
+  try {
+    await world.generateAsync(2, (progress) => setLoadingProgress(progress));
+    finalizeWorldLoad();
+    setLoadingProgress(1);
+    hideLoadingOverlay();
+    if (controls.isLocked) {
+      overlay.classList.add('hidden');
+    } else {
+      overlay.classList.remove('hidden');
+    }
+  } catch (error) {
+    console.error('Failed to generate world', error);
+    handleWorldLoadError();
+  } finally {
+    loadingInProgress = false;
+    if (loadingOverlay) {
+      const visible = loadingOverlay.classList.contains('visible');
+      loadingOverlay.setAttribute('aria-hidden', String(!visible));
+    }
+  }
+}
+
+function handleWorldLoadError() {
+  hideLoadingOverlay();
+  overlay.classList.remove('hidden');
+  worldReady = false;
+  if (loadingLabel) loadingLabel.textContent = 'Failed to load world. Click to retry.';
+}
+
+function finalizeWorldLoad() {
+  spawn = world.getSpawnPoint();
+  controls.getObject().position.copy(spawn);
+  controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
+  lastSafePosition.copy(controls.getObject().position);
+  currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
+  takeoffGroundHeight = currentGroundHeight;
+  maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+  wasGroundedPrevious = true;
+  worldReady = true;
+  hudAccumulator = 0;
+  updateHUD();
+  updateFPSHud(0);
+}
+
+function showLoadingOverlay() {
+  if (!loadingOverlay) return;
+  loadingOverlay.classList.add('visible');
+  loadingOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideLoadingOverlay() {
+  if (!loadingOverlay) return;
+  loadingOverlay.classList.remove('visible');
+  loadingOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function setLoadingProgress(progress) {
+  if (!loadingBar || !loadingPercent) return;
+  const clamped = Math.max(0, Math.min(1, progress));
+  loadingBar.style.width = `${(clamped * 100).toFixed(1)}%`;
+  loadingPercent.textContent = `${Math.round(clamped * 100)}%`;
+}
+
 function updateHUD() {
   if (!hud) return;
+  if (!worldReady) {
+    hud.innerHTML = '<div>Loading world…</div>';
+    return;
+  }
   const pos = controls.getObject().position;
   const lines = [`XYZ: ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`];
   const totals = world.getBlockTotals();

@@ -821,6 +821,34 @@ export class World {
     }
   }
 
+  async generateAsync(radius = 2, onProgress = null) {
+    const tasks = [];
+    for (let cx = -radius; cx <= radius; cx += 1) {
+      for (let cz = -radius; cz <= radius; cz += 1) {
+        tasks.push([cx, cz]);
+      }
+    }
+
+    const total = tasks.length;
+    if (total === 0) {
+      if (typeof onProgress === 'function') onProgress(1);
+      return;
+    }
+
+    for (let index = 0; index < total; index += 1) {
+      const [cx, cz] = tasks[index];
+      this.ensureChunk(cx, cz);
+      if (typeof onProgress === 'function') {
+        onProgress((index + 1) / total);
+      }
+      if (index < total - 1) {
+        // Yield control so the UI can update between chunk generations.
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    }
+  }
+
   applyChunkCounts(chunk, delta) {
     const counts = chunk.counts;
     for (let i = 0; i < counts.length; i += 1) {

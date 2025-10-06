@@ -14,6 +14,15 @@
     </div>
     <div id="hud" class="hud" aria-live="polite"></div>
     <div id="hud-fps" class="hud hud--top-right" aria-live="polite" aria-label="frame rate"></div>
+    <div id="loading" class="loading" aria-hidden="true">
+      <div class="loading__panel" role="status" aria-live="polite">
+        <div id="loading-label" class="loading__label">Loading world…</div>
+        <div class="loading__bar" aria-hidden="true">
+          <div id="loading-bar" class="loading__bar-fill"></div>
+        </div>
+        <div id="loading-percent" class="loading__percent">0%</div>
+      </div>
+    </div>
     <div id="crosshair" class="crosshair" aria-hidden="true"></div>
     <canvas id="game"></canvas>
     <script type="module" src="./src/main.js"></script>

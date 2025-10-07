@@ -13,11 +13,13 @@ const loadingBar = document.getElementById('loading-bar');
 const loadingPercent = document.getElementById('loading-percent');
 const crosshair = document.getElementById('crosshair');
 const inventoryBar = document.getElementById('inventory');
+const healthBar = document.getElementById('health');
 
 const HOTBAR_SLOT_COUNT = 9;
 const MAX_STACK_SIZE = 64;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const BGM_URL = './src/sounds/bgm-sunny.mp3';
+const MAX_HEALTH = 20;
 const GAMEPAD_MOVE_DEADZONE = 0.18;
 const GAMEPAD_LOOK_DEADZONE = 0.12;
 const GAMEPAD_LOOK_SENSITIVITY = THREE.MathUtils.degToRad(210);
@@ -316,6 +318,7 @@ class Inventory {
 const inventory = new Inventory();
 let activeHotbarIndex = 0;
 const sound = new SoundManager();
+let health = MAX_HEALTH;
 const gamepadState = {
   index: -1,
   connected: false,
@@ -341,6 +344,7 @@ function applyDeadzone(value, deadzone) {
 }
 
 updateInventoryUI();
+updateHealthUI();
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -378,6 +382,7 @@ let loadingInProgress = false;
 if (hud) hud.classList.add('hidden');
 if (crosshair) crosshair.classList.add('hidden');
 if (inventoryBar) inventoryBar.classList.add('hidden');
+if (healthBar) healthBar.classList.add('hidden');
 
 let spawn = new THREE.Vector3();
 let currentGroundHeight = 0;
@@ -754,6 +759,15 @@ function updatePhysics(delta) {
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
   }
 
+  if (!wasGroundedPrevFrame && grounded) {
+    const landingSurface = Number.isFinite(surface) ? surface : currentGroundHeight;
+    const fallDistance = Math.max(0, takeoffGroundHeight - landingSurface);
+    if (fallDistance > 3) {
+      const damage = Math.floor((fallDistance - 3) * 2);
+      if (damage > 0) applyDamage(damage);
+    }
+  }
+
   if (grounded && surface > maxClimbHeight) {
     object.position.copy(previousPosition);
     velocity.x = 0;
@@ -901,6 +915,7 @@ function handleWorldLoadError() {
   worldReady = false;
   if (loadingLabel) loadingLabel.textContent = 'Failed to load world. Click to retry.';
   if (inventoryBar) inventoryBar.classList.add('hidden');
+  if (healthBar) healthBar.classList.add('hidden');
   sound.pauseBgm();
   updateCrosshairVisibility();
 }
@@ -917,10 +932,13 @@ function finalizeWorldLoad() {
   worldReady = true;
   if (hud) hud.classList.remove('hidden');
   if (inventoryBar) inventoryBar.classList.remove('hidden');
+  if (healthBar) healthBar.classList.remove('hidden');
   hudAccumulator = 0;
   updateHUD();
   updateFPSHud(0);
   updateInventoryUI();
+  health = MAX_HEALTH;
+  updateHealthUI();
   sound.resume();
   void sound.startBgm();
   updateCrosshairVisibility();
@@ -1094,6 +1112,62 @@ function handleInventoryWheel(deltaY) {
   }
   setActiveHotbarIndex(nextIndex);
   return true;
+}
+
+function clampHealth(value) {
+  if (Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(MAX_HEALTH, value));
+}
+
+function updateHealthUI() {
+  if (!healthBar) return;
+  const totalHearts = MAX_HEALTH / 2;
+  let remaining = clampHealth(health);
+  const fragments = [];
+  for (let i = 0; i < totalHearts; i += 1) {
+    let className = 'health__heart';
+    if (remaining >= 2) {
+      className += ' health__heart--full';
+      remaining -= 2;
+    } else if (remaining === 1) {
+      className += ' health__heart--half';
+      remaining = 0;
+    } else {
+      className += ' health__heart--empty';
+    }
+    fragments.push(`<div class="${className}"></div>`);
+  }
+  healthBar.innerHTML = fragments.join('');
+  const heartsValue = (clampHealth(health) / 2).toFixed(1).replace(/\.0$/, '');
+  healthBar.setAttribute('aria-label', `Health: ${heartsValue} hearts`);
+}
+
+function applyDamage(amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  health = clampHealth(health - amount);
+  updateHealthUI();
+  if (health <= 0) {
+    handlePlayerDeath();
+  }
+}
+
+function heal(amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  health = clampHealth(health + amount);
+  updateHealthUI();
+}
+
+function handlePlayerDeath() {
+  health = MAX_HEALTH;
+  updateHealthUI();
+  const player = controls.getObject();
+  player.position.copy(spawn);
+  player.position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
+  velocity.set(0, 0, 0);
+  footstepDistanceAccumulator = 0;
+  currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
+  takeoffGroundHeight = currentGroundHeight;
+  maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
 }
 
 function updateGamepadState() {

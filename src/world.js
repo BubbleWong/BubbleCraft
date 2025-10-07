@@ -28,6 +28,8 @@ const mix = (a, b, t) => a * (1 - t) + b * t;
 const CHUNK_PRIORITY_DIRECTION_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 6;
 const CHUNK_PRIORITY_BAND_STEP = Math.max(1, CHUNK_SIZE * 0.75);
 const CHUNK_PRIORITY_BAND_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 4;
+const CHUNK_URGENT_PRIORITY_WEIGHT = CHUNK_PRIORITY_DIRECTION_WEIGHT * 400;
+const CHUNK_RECENCY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 4;
 
 const TOP_FACE_INDEX = 2;
 const BOTTOM_FACE_INDEX = 3;
@@ -623,9 +625,9 @@ class Chunk {
     }
   }
 
-  rebuild() {
+  rebuild(options = {}) {
     this.geometryVersion += 1;
-    this.world.queueChunkRebuild(this);
+    this.world.queueChunkRebuild(this, options);
   }
 }
 
@@ -635,6 +637,7 @@ export class World {
     this.chunks = new Map();
     this.chunkMeshes = new Set();
     this.pendingRebuilds = new Map();
+    this.rebuildRequestSerial = 0;
     this.activeRebuilds = 0;
     let concurrency = 2;
     if (typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)) {
@@ -690,14 +693,23 @@ export class World {
     return chunk;
   }
 
-  queueChunkRebuild(chunk) {
+  queueChunkRebuild(chunk, options = {}) {
     if (!chunk) return;
+    const { urgent = false } = options;
     const version = chunk.geometryVersion;
     const existing = this.pendingRebuilds.get(chunk);
+    const order = (this.rebuildRequestSerial += 1);
     if (existing) {
       existing.version = version;
+      existing.urgent = existing.urgent || urgent;
+      existing.order = order;
     } else {
-      this.pendingRebuilds.set(chunk, { chunk, version });
+      this.pendingRebuilds.set(chunk, {
+        chunk,
+        version,
+        urgent,
+        order,
+      });
     }
     this.processRebuildQueue();
   }
@@ -753,11 +765,22 @@ export class World {
     for (const entry of this.pendingRebuilds.values()) {
       const { chunk } = entry;
       if (!chunk || chunk.rebuildInFlight) continue;
-      const priority = this.computeChunkPriority(chunk);
+      const entryOrder = entry.order ?? 0;
+      let priority = this.computeChunkPriority(chunk);
+      if (entry.urgent) {
+        priority -= CHUNK_URGENT_PRIORITY_WEIGHT;
+      }
+      const recencyBoost = this.rebuildRequestSerial - entryOrder;
+      if (recencyBoost > 0) {
+        priority -= recencyBoost * CHUNK_RECENCY_WEIGHT;
+      }
       const bestVersion = best ? best.version : -Infinity;
+      const bestOrder = best ? (best.order ?? 0) : -Infinity;
       if (
         priority < bestPriority - 1e-6 ||
-        (Math.abs(priority - bestPriority) <= 1e-6 && bestVersion < entry.version)
+        (Math.abs(priority - bestPriority) <= 1e-6 &&
+          (bestVersion < entry.version ||
+            (bestVersion === entry.version && bestOrder < entryOrder)))
       ) {
         best = entry;
         bestPriority = priority;
@@ -827,18 +850,19 @@ export class World {
     if (type <= MAX_BLOCK_TYPE) {
       this.blockTotals[type] += 1;
     }
-    chunk.rebuild();
+    const urgentOptions = { urgent: true };
+    chunk.rebuild(urgentOptions);
 
-    if (lx === 0) this.rebuildChunkIfExists(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.rebuildChunkIfExists(cx + 1, cz);
-    if (lz === 0) this.rebuildChunkIfExists(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.rebuildChunkIfExists(cx, cz + 1);
+    if (lx === 0) this.rebuildChunkIfExists(cx - 1, cz, urgentOptions);
+    if (lx === CHUNK_SIZE - 1) this.rebuildChunkIfExists(cx + 1, cz, urgentOptions);
+    if (lz === 0) this.rebuildChunkIfExists(cx, cz - 1, urgentOptions);
+    if (lz === CHUNK_SIZE - 1) this.rebuildChunkIfExists(cx, cz + 1, urgentOptions);
     return true;
   }
 
-  rebuildChunkIfExists(cx, cz) {
+  rebuildChunkIfExists(cx, cz, options = {}) {
     const chunk = this.getChunk(cx, cz);
-    if (chunk) chunk.rebuild();
+    if (chunk) chunk.rebuild(options);
   }
 
   generate(radius = 2) {

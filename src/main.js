@@ -47,6 +47,9 @@ class SoundManager {
     this.bgmStarted = false;
     this.bgmSource = null;
     this.bgmBuffer = null;
+    this.bgmStartTime = 0;
+    this.bgmOffset = 0;
+    this.bgmPlaying = false;
   }
 
   ensureContext() {
@@ -156,28 +159,92 @@ class SoundManager {
     osc.stop(now + 0.25);
   }
 
-  async startBgm() {
+  async ensureBgmBuffer() {
     this.ensureContext();
-    if (!this.context || this.bgmStarted) return;
+    if (!this.context) return null;
+    if (this.bgmBuffer) return this.bgmBuffer;
+    const response = await fetch(BGM_URL);
+    if (!response.ok) throw new Error(`Failed to load BGM: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    this.bgmBuffer = await this.context.decodeAudioData(arrayBuffer.slice(0));
+    return this.bgmBuffer;
+  }
 
-    try {
-      if (!this.bgmBuffer) {
-        const response = await fetch(BGM_URL);
-        if (!response.ok) throw new Error(`Failed to load BGM: ${response.status}`);
-        const arrayBuffer = await response.arrayBuffer();
-        this.bgmBuffer = await this.context.decodeAudioData(arrayBuffer.slice(0));
+  stopBgmInternal() {
+    if (this.bgmSource) {
+      try {
+        this.bgmSource.onended = null;
+        this.bgmSource.stop();
+      } catch (error) {
+        // no-op
       }
-
-      const source = this.context.createBufferSource();
-      source.buffer = this.bgmBuffer;
-      source.loop = true;
-      source.connect(this.musicGain);
-      source.start(this.context.currentTime + 0.05);
-      this.bgmSource = source;
-      this.bgmStarted = true;
-    } catch (error) {
-      console.warn('Unable to start background music:', error);
+      try {
+        this.bgmSource.disconnect();
+      } catch (error) {
+        // no-op
+      }
     }
+    this.bgmSource = null;
+  }
+
+  async startBgm(offset = null) {
+    this.ensureContext();
+    if (!this.context) return;
+    try {
+      await this.ensureBgmBuffer();
+    } catch (error) {
+      console.warn('Unable to load background music:', error);
+      return;
+    }
+    if (!this.bgmBuffer) return;
+    if (this.bgmPlaying) return;
+
+    const duration = this.bgmBuffer.duration || 0;
+    let startOffset = this.bgmOffset;
+    if (typeof offset === 'number') startOffset = offset;
+    if (duration > 0) {
+      startOffset = ((startOffset % duration) + duration) % duration;
+    } else {
+      startOffset = 0;
+    }
+
+    this.stopBgmInternal();
+    const source = this.context.createBufferSource();
+    source.buffer = this.bgmBuffer;
+    source.loop = true;
+    source.connect(this.musicGain);
+    source.start(0, startOffset);
+    this.bgmSource = source;
+    this.bgmOffset = startOffset;
+    this.bgmStartTime = this.context.currentTime - startOffset;
+    this.bgmStarted = true;
+    this.bgmPlaying = true;
+    source.onended = () => {
+      if (!this.bgmPlaying) return;
+      this.bgmPlaying = false;
+    };
+  }
+
+  pauseBgm() {
+    if (!this.context || !this.bgmPlaying) return;
+    if (this.bgmBuffer) {
+      const duration = this.bgmBuffer.duration || 0;
+      if (duration > 0) {
+        const elapsed = this.context.currentTime - (this.bgmStartTime ?? 0);
+        this.bgmOffset = ((this.bgmOffset + elapsed) % duration + duration) % duration;
+      }
+    }
+    this.stopBgmInternal();
+    this.bgmPlaying = false;
+  }
+
+  async resumeBgm() {
+    if (this.bgmPlaying) return;
+    if (!this.bgmStarted) {
+      await this.startBgm(0);
+      return;
+    }
+    await this.startBgm();
   }
 
   makeNoiseBuffer(durationSeconds) {
@@ -359,10 +426,12 @@ controls.addEventListener('lock', () => {
     overlay.classList.add('hidden');
   }
   sound.resume();
+  if (worldReady) void sound.resumeBgm();
   updateCrosshairVisibility();
 });
 
 controls.addEventListener('unlock', () => {
+  sound.pauseBgm();
   if (loadingInProgress) return;
   overlay.classList.remove('hidden');
   updateCrosshairVisibility();
@@ -832,6 +901,7 @@ function handleWorldLoadError() {
   worldReady = false;
   if (loadingLabel) loadingLabel.textContent = 'Failed to load world. Click to retry.';
   if (inventoryBar) inventoryBar.classList.add('hidden');
+  sound.pauseBgm();
   updateCrosshairVisibility();
 }
 
@@ -1106,7 +1176,7 @@ function updateGamepadState() {
     }
   });
 
-  handleButton(4, () => {
+  handleButton(10, () => {
     setMovementState('ShiftLeft', true);
   }, () => {
     setMovementState('ShiftLeft', false);
@@ -1128,9 +1198,16 @@ function updateGamepadState() {
     attemptPlaceBlock();
   };
 
-  handleButton(5, breakAction, null);
   handleButton(7, breakAction, null, GAMEPAD_TRIGGER_THRESHOLD);
   handleButton(6, placeAction, null, GAMEPAD_TRIGGER_THRESHOLD);
+
+  handleButton(4, () => {
+    handleInventoryWheel(-1);
+  });
+
+  handleButton(5, () => {
+    handleInventoryWheel(1);
+  });
 
   handleButton(14, () => {
     handleInventoryWheel(-1);

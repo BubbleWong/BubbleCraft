@@ -335,72 +335,103 @@ const chunkKey = (cx, cz) => `${cx},${cz}`;
 
 function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
   const tasks = [];
-  for (let cx = -radius; cx <= radius; cx += 1) {
-    for (let cz = -radius; cz <= radius; cz += 1) {
-      tasks.push({ cx, cz });
-    }
+  const maxRadius = Math.max(0, Math.floor(Number.isFinite(radius) ? radius : 0));
+
+  let baseChunkX = 0;
+  let baseChunkZ = 0;
+  let playerWorldX = CHUNK_SIZE * 0.5;
+  let playerWorldZ = CHUNK_SIZE * 0.5;
+  if (playerPosition && Number.isFinite(playerPosition.x) && Number.isFinite(playerPosition.z)) {
+    baseChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    baseChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
+    playerWorldX = playerPosition.x;
+    playerWorldZ = playerPosition.z;
   }
 
-  let px = 0;
-  let pz = 0;
-  if (playerPosition && typeof playerPosition.x === 'number' && typeof playerPosition.z === 'number') {
-    px = playerPosition.x;
-    pz = playerPosition.z;
-  }
+  const directionVectors = [
+    { dx: 0, dz: -1 }, // -Z, default toward camera forward
+    { dx: 1, dz: 0 },  // +X
+    { dx: 0, dz: 1 },  // +Z
+    { dx: -1, dz: 0 }, // -X
+  ];
 
-  let fx = 0;
-  let fz = 0;
-  let hasForward = false;
+  let startDirection = 0;
   if (forward) {
-    const magnitudeSq = (forward.x ?? 0) * (forward.x ?? 0) + (forward.z ?? 0) * (forward.z ?? 0);
-    if (magnitudeSq > 1e-6) {
+    const fxRaw = forward.x ?? 0;
+    const fzRaw = forward.z ?? 0;
+    const magnitudeSq = fxRaw * fxRaw + fzRaw * fzRaw;
+    if (magnitudeSq > 1e-12) {
       const magnitude = Math.sqrt(magnitudeSq);
-      fx = (forward.x ?? 0) / magnitude;
-      fz = (forward.z ?? 0) / magnitude;
-      hasForward = true;
+      const fx = fxRaw / magnitude;
+      const fz = fzRaw / magnitude;
+      let bestDot = -Infinity;
+      for (let i = 0; i < directionVectors.length; i += 1) {
+        const dir = directionVectors[i];
+        const dot = dir.dx * fx + dir.dz * fz;
+        if (dot > bestDot) {
+          bestDot = dot;
+          startDirection = i;
+        }
+      }
     }
   }
 
-  tasks.sort((a, b) => {
-    const centerAx = a.cx * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-    const centerAz = a.cz * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-    const centerBx = b.cx * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-    const centerBz = b.cz * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+  const directionOrder = [
+    directionVectors[startDirection],
+    directionVectors[(startDirection + 1) % 4],
+    directionVectors[(startDirection + 2) % 4],
+    directionVectors[(startDirection + 3) % 4],
+  ];
 
-    const dxA = centerAx - px;
-    const dzA = centerAz - pz;
-    const dxB = centerBx - px;
-    const dzB = centerBz - pz;
+  const visited = new Set();
+  const totalTargets = (maxRadius * 2 + 1) ** 2;
 
-    const distASquared = dxA * dxA + dzA * dzA;
-    const distBSquared = dxB * dxB + dzB * dzB;
+  const pushTask = (offsetX, offsetZ) => {
+    if (Math.max(Math.abs(offsetX), Math.abs(offsetZ)) > maxRadius) return;
+    const cx = baseChunkX + offsetX;
+    const cz = baseChunkZ + offsetZ;
+    const key = chunkKey(cx, cz);
+    if (visited.has(key)) return;
+    visited.add(key);
+    tasks.push({ cx, cz });
+  };
 
-    if (distASquared !== distBSquared) return distASquared - distBSquared;
+  pushTask(0, 0);
 
-    if (hasForward) {
-      let dotA = 1;
-      let dotB = 1;
+  if (maxRadius === 0) {
+    return tasks;
+  }
 
-      if (distASquared > 1e-6) {
-        const distanceA = Math.sqrt(distASquared);
-        dotA = (dxA / distanceA) * fx + (dzA / distanceA) * fz;
+  let offsetX = 0;
+  let offsetZ = 0;
+  let stepsToTake = 1;
+  let directionIndex = 0;
+
+  while (visited.size < totalTargets && stepsToTake <= (maxRadius + 1) * 4) {
+    for (let turn = 0; turn < 2; turn += 1) {
+      const dir = directionOrder[directionIndex % 4];
+      for (let step = 0; step < stepsToTake; step += 1) {
+        offsetX += dir.dx;
+        offsetZ += dir.dz;
+        pushTask(offsetX, offsetZ);
+        if (visited.size >= totalTargets) break;
       }
-      if (distBSquared > 1e-6) {
-        const distanceB = Math.sqrt(distBSquared);
-        dotB = (dxB / distanceB) * fx + (dzB / distanceB) * fz;
-      }
-
-      if (Math.abs(dotA - dotB) > 1e-6) {
-        return dotB - dotA;
-      }
+      directionIndex += 1;
+      if (visited.size >= totalTargets) break;
     }
+    stepsToTake += 1;
+  }
 
-    const angleA = distASquared <= 1e-6 ? 0 : (Math.atan2(dzA, dxA) + Math.PI * 2) % (Math.PI * 2);
-    const angleB = distBSquared <= 1e-6 ? 0 : (Math.atan2(dzB, dxB) + Math.PI * 2) % (Math.PI * 2);
-    if (angleA !== angleB) return angleA - angleB;
-    if (a.cx !== b.cx) return a.cx - b.cx;
-    return a.cz - b.cz;
-  });
+  // Fallback: if some positions are still missing (due to guard limits), add them directly.
+  if (visited.size < totalTargets) {
+    for (let dz = -maxRadius; dz <= maxRadius; dz += 1) {
+      for (let dx = -maxRadius; dx <= maxRadius; dx += 1) {
+        pushTask(dx, dz);
+        if (visited.size >= totalTargets) break;
+      }
+      if (visited.size >= totalTargets) break;
+    }
+  }
 
   return tasks;
 }

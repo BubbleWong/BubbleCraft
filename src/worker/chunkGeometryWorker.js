@@ -591,6 +591,9 @@ function addFlowerGeometry(
   const paletteIndex = Math.floor(random.random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
   const paletteBase = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
 
+  const scale = 0.78 + random.random3D(worldX, worldY, worldZ, 689) * 0.35;
+  const heightScale = 0.85 + random.random3D(worldX, worldY, worldZ, 690) * 0.25;
+
   const palette = {
     petalBase: adjustRandomColor(paletteBase.petalBase, random, worldX, worldY, worldZ, 701, 0.18),
     petalEdge: adjustRandomColor(paletteBase.petalEdge, random, worldX, worldY, worldZ, 703, 0.18),
@@ -598,7 +601,7 @@ function addFlowerGeometry(
     center: adjustRandomColor(paletteBase.center ?? FLOWER_CENTER_COLOR, random, worldX, worldY, worldZ, 707, 0.08),
   };
 
-  const stemHeight = 0.55 + random.random3D(worldX, worldY, worldZ, 502) * 0.4;
+  const stemHeight = (0.55 + random.random3D(worldX, worldY, worldZ, 502) * 0.4) * heightScale;
   const stemBottom = [centerX, y, centerZ];
   const stemLeanAngle = random.random2D(worldX, worldZ, 742) * Math.PI * 2;
   const stemLeanAmount = (random.random3D(worldX, worldY, worldZ, 743) - 0.5) * 0.35;
@@ -611,7 +614,7 @@ function addFlowerGeometry(
   const stemRotation = random.random2D(worldX, worldZ, 752) * Math.PI * 2;
   const stemBottomColor = darkenColor(FLOWER_STEM_COLOR, 0.18 + random.random3D(worldX, worldY, worldZ, 753) * 0.1);
   const stemTopColor = lightenColor(FLOWER_STEM_COLOR, 0.1 + random.random3D(worldX, worldY, worldZ, 754) * 0.12);
-  const stemRadius = 0.04 + random.random3D(worldX, worldY, worldZ, 755) * 0.018;
+  const stemRadius = (0.04 + random.random3D(worldX, worldY, worldZ, 755) * 0.018) * scale;
 
   addStemPanels(positions, normals, colors, stemBottom, stemTop, stemRadius, stemRotation, stemBottomColor, stemTopColor);
   addStemLeaves(
@@ -627,13 +630,13 @@ function addFlowerGeometry(
     worldZ,
   );
 
-  const bloomBottom = stemTop[1] - 0.05;
-  const bloomTop = stemTop[1] + 0.38 + random.random3D(worldX, worldY, worldZ, 760) * 0.22;
+  const bloomBottom = stemTop[1] - 0.05 * scale;
+  const bloomTop = stemTop[1] + (0.38 + random.random3D(worldX, worldY, worldZ, 760) * 0.22) * scale;
   const stemTopCenter = stemTop;
 
   const petalCount = 4 + Math.floor(random.random3D(worldX, worldY, worldZ, 761) * 4);
   const rotation = random.random2D(worldX, worldZ, 762) * Math.PI * 2;
-  const layerRadius = 0.28 + random.random3D(worldX, worldY, worldZ, 763) * 0.15;
+  const layerRadius = (0.28 + random.random3D(worldX, worldY, worldZ, 763) * 0.15) * scale;
 
   addPetalLayer(
     positions,
@@ -698,7 +701,7 @@ function addFlowerGeometry(
     }
   }
 
-  const coreRadius = 0.12 + random.random3D(worldX, worldY, worldZ, 765) * 0.05;
+  const coreRadius = (0.12 + random.random3D(worldX, worldY, worldZ, 765) * 0.05) * scale;
   const coreBottom = bloomTop - 0.14;
   const coreTop = bloomTop;
   const coreRotation = rotation + Math.PI / 6;

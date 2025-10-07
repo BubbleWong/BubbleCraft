@@ -17,6 +17,12 @@ const inventoryBar = document.getElementById('inventory');
 const HOTBAR_SLOT_COUNT = 9;
 const MAX_STACK_SIZE = 64;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
+const BGM_URL = './src/sounds/bgm-sunny.mp3';
+const GAMEPAD_MOVE_DEADZONE = 0.18;
+const GAMEPAD_LOOK_DEADZONE = 0.12;
+const GAMEPAD_LOOK_SENSITIVITY = THREE.MathUtils.degToRad(210);
+const GAMEPAD_TRIGGER_THRESHOLD = 0.4;
+const GAMEPAD_BUTTON_THRESHOLD = 0.3;
 
 const MATERIAL_SOUND_PROFILE = {
   [BLOCK_TYPES.grass]: { stepCutoff: 1200, breakCutoff: 1500, breakQ: 1.2, placeFreq: 440 },
@@ -39,7 +45,8 @@ class SoundManager {
     this.fxGain = null;
     this.musicGain = null;
     this.bgmStarted = false;
-    this.bgmNodes = [];
+    this.bgmSource = null;
+    this.bgmBuffer = null;
   }
 
   ensureContext() {
@@ -149,36 +156,27 @@ class SoundManager {
     osc.stop(now + 0.25);
   }
 
-  startBgm() {
+  async startBgm() {
     this.ensureContext();
     if (!this.context || this.bgmStarted) return;
-    this.bgmStarted = true;
-    const now = this.context.currentTime;
-    const voices = [
-      { freq: 196, type: 'sine', gain: 0.18, lfoFreq: 0.05 },
-      { freq: 246.94, type: 'triangle', gain: 0.14, lfoFreq: 0.07 },
-      { freq: 329.63, type: 'sawtooth', gain: 0.12, lfoFreq: 0.09 },
-    ];
-    for (const voice of voices) {
-      const osc = this.context.createOscillator();
-      osc.type = voice.type;
-      const gain = this.context.createGain();
-      gain.gain.value = 0;
-      osc.frequency.value = voice.freq;
-      osc.connect(gain).connect(this.musicGain);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(voice.gain, now + 3.5);
-      gain.gain.linearRampToValueAtTime(voice.gain * 0.92, now + 16 + Math.random() * 4);
 
-      const lfo = this.context.createOscillator();
-      const lfoGain = this.context.createGain();
-      lfo.frequency.value = voice.lfoFreq;
-      lfoGain.gain.value = voice.freq * 0.015;
-      lfo.connect(lfoGain).connect(osc.frequency);
-      lfo.start(now);
+    try {
+      if (!this.bgmBuffer) {
+        const response = await fetch(BGM_URL);
+        if (!response.ok) throw new Error(`Failed to load BGM: ${response.status}`);
+        const arrayBuffer = await response.arrayBuffer();
+        this.bgmBuffer = await this.context.decodeAudioData(arrayBuffer.slice(0));
+      }
 
-      osc.start(now);
-      this.bgmNodes.push({ osc, gain, lfo, lfoGain });
+      const source = this.context.createBufferSource();
+      source.buffer = this.bgmBuffer;
+      source.loop = true;
+      source.connect(this.musicGain);
+      source.start(this.context.currentTime + 0.05);
+      this.bgmSource = source;
+      this.bgmStarted = true;
+    } catch (error) {
+      console.warn('Unable to start background music:', error);
     }
   }
 
@@ -251,12 +249,28 @@ class Inventory {
 const inventory = new Inventory();
 let activeHotbarIndex = 0;
 const sound = new SoundManager();
+const gamepadState = {
+  index: -1,
+  connected: false,
+  buttons: [],
+  moveX: 0,
+  moveY: 0,
+  lookX: 0,
+  lookY: 0,
+};
 
 function blockColorToCss(type) {
   const base = BLOCK_COLORS[type] ?? FLOWER_PETAL_COLORS[type];
   if (!base) return 'rgba(255, 255, 255, 0.2)';
   const [r, g, b] = base.map((channel) => Math.round(channel * 255));
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function applyDeadzone(value, deadzone) {
+  if (Math.abs(value) < deadzone) return 0;
+  const sign = Math.sign(value);
+  const adjusted = (Math.abs(value) - deadzone) / (1 - deadzone);
+  return adjusted * sign;
 }
 
 updateInventoryUI();
@@ -315,6 +329,29 @@ overlay.addEventListener('click', () => {
     return;
   }
   startWorldLoading();
+});
+
+function releaseGamepadControls() {
+  setMovementState('ShiftLeft', false);
+  setMovementState('Space', false);
+}
+
+window.addEventListener('gamepadconnected', (event) => {
+  if (gamepadState.index === -1) gamepadState.index = event.gamepad.index;
+  gamepadState.connected = true;
+});
+
+window.addEventListener('gamepaddisconnected', (event) => {
+  if (event.gamepad.index === gamepadState.index) {
+    gamepadState.index = -1;
+    gamepadState.connected = false;
+    gamepadState.buttons = [];
+    gamepadState.moveX = 0;
+    gamepadState.moveY = 0;
+    gamepadState.lookX = 0;
+    gamepadState.lookY = 0;
+    releaseGamepadControls();
+  }
 });
 
 controls.addEventListener('lock', () => {
@@ -432,43 +469,49 @@ document.addEventListener('wheel', (event) => {
   if (handleInventoryWheel(event.deltaY)) event.preventDefault();
 }, { passive: false });
 
+function attemptBreakBlock() {
+  if (!controls.isLocked || !worldReady) return false;
+  refreshRaycaster();
+  const target = world.getRaycastTarget(raycaster, { place: false });
+  if (!target) return false;
+  const blockType = world.getBlock(target.x, target.y, target.z);
+  if (blockType === BLOCK_TYPES.air) return false;
+  const removed = world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
+  if (!removed) return false;
+  sound.playBlockBreak(blockType);
+  inventory.add(blockType, 1);
+  updateInventoryUI();
+  return true;
+}
+
+function attemptPlaceBlock(forceType = null) {
+  if (!controls.isLocked || !worldReady) return false;
+  const slot = inventory.getSlot(activeHotbarIndex);
+  const blockType = forceType ?? slot?.type;
+  if (!blockType || blockType === BLOCK_TYPES.air) return false;
+  refreshRaycaster();
+  const target = world.getRaycastTarget(raycaster, { place: true });
+  if (!target || target.y < 0 || target.y >= CHUNK_HEIGHT - 1) return false;
+  const playerPos = controls.getObject().position;
+  const distance = Math.hypot(target.x + 0.5 - playerPos.x, target.y + 0.5 - playerPos.y, target.z + 0.5 - playerPos.z);
+  if (distance <= 1.75) return false;
+  const existing = world.getBlock(target.x, target.y, target.z);
+  if (existing !== BLOCK_TYPES.air) return false;
+  const placed = world.setBlock(target.x, target.y, target.z, blockType);
+  if (!placed) return false;
+  if (!forceType) inventory.removeFromSlot(activeHotbarIndex, 1);
+  updateInventoryUI();
+  sound.playBlockPlace(blockType);
+  return true;
+}
+
 document.addEventListener('mousedown', (event) => {
   if (!controls.isLocked) return;
-  refreshRaycaster();
-
   if (event.button === 0) {
-    const target = world.getRaycastTarget(raycaster, { place: false });
-    if (target) {
-      const blockType = world.getBlock(target.x, target.y, target.z);
-      if (blockType !== BLOCK_TYPES.air) {
-        const removed = world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
-        if (removed) {
-          sound.playBlockBreak(blockType);
-          inventory.add(blockType, 1);
-          updateInventoryUI();
-        }
-      }
-    }
+    attemptBreakBlock();
   } else if (event.button === 2) {
     event.preventDefault();
-    const activeSlot = inventory.getSlot(activeHotbarIndex);
-    if (!activeSlot) return;
-    const target = world.getRaycastTarget(raycaster, { place: true });
-    if (target && target.y >= 0 && target.y < CHUNK_HEIGHT - 1) {
-      const playerPos = controls.getObject().position;
-      const distance = Math.hypot(target.x + 0.5 - playerPos.x, target.y + 0.5 - playerPos.y, target.z + 0.5 - playerPos.z);
-      if (distance > 1.75) {
-        const existing = world.getBlock(target.x, target.y, target.z);
-        if (existing !== BLOCK_TYPES.air) return;
-        const placeType = activeSlot.type;
-        const placed = world.setBlock(target.x, target.y, target.z, placeType);
-        if (placed) {
-          inventory.removeFromSlot(activeHotbarIndex, 1);
-          updateInventoryUI();
-          sound.playBlockPlace(placeType);
-        }
-      }
-    }
+    attemptPlaceBlock();
   }
 });
 
@@ -566,9 +609,14 @@ function updatePhysics(delta) {
   velocity.z -= velocity.z * 10 * delta;
   velocity.y -= gravity * delta;
 
-  direction.z = Number(keyState.forward) - Number(keyState.backward);
-  direction.x = Number(keyState.right) - Number(keyState.left);
-  direction.normalize();
+  const digitalZ = Number(keyState.forward) - Number(keyState.backward);
+  const digitalX = Number(keyState.right) - Number(keyState.left);
+  direction.z = digitalZ + gamepadState.moveY;
+  direction.x = digitalX + gamepadState.moveX;
+  const dirLength = direction.length();
+  if (dirLength > 1) {
+    direction.divideScalar(dirLength);
+  }
 
   const accel = walkAcceleration * (keyState.sprint ? sprintMultiplier : 1);
 
@@ -710,7 +758,9 @@ function updatePhysics(delta) {
 function animate() {
   const frameDelta = clock.getDelta();
   const delta = Math.min(0.05, frameDelta);
+  updateGamepadState();
   applyKeyboardLook(frameDelta);
+  applyGamepadLook(delta);
   updatePhysics(delta);
   hudAccumulator += delta;
   if (hudAccumulator >= 0.2) {
@@ -802,7 +852,7 @@ function finalizeWorldLoad() {
   updateFPSHud(0);
   updateInventoryUI();
   sound.resume();
-  sound.startBgm();
+  void sound.startBgm();
   updateCrosshairVisibility();
 }
 
@@ -854,6 +904,19 @@ function applyKeyboardLook(delta) {
   euler.y += yaw;
   euler.x = clampPitch(euler.x + pitch);
 
+  camera.quaternion.setFromEuler(euler);
+}
+
+function applyGamepadLook(delta) {
+  if (!worldReady || !controls.isLocked) return;
+  const yawInput = gamepadState.lookX;
+  const pitchInput = gamepadState.lookY;
+  if (Math.abs(yawInput) < 1e-3 && Math.abs(pitchInput) < 1e-3) return;
+  const camera = controls.getObject();
+  const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  euler.setFromQuaternion(camera.quaternion);
+  euler.y -= yawInput * GAMEPAD_LOOK_SENSITIVITY * delta;
+  euler.x = clampPitch(euler.x + pitchInput * GAMEPAD_LOOK_SENSITIVITY * delta);
   camera.quaternion.setFromEuler(euler);
 }
 
@@ -961,4 +1024,120 @@ function handleInventoryWheel(deltaY) {
   }
   setActiveHotbarIndex(nextIndex);
   return true;
+}
+
+function updateGamepadState() {
+  const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+  let pad = null;
+  if (gamepadState.index >= 0 && pads[gamepadState.index]) {
+    pad = pads[gamepadState.index];
+  } else {
+    for (const candidate of pads) {
+      if (candidate && candidate.connected) {
+        pad = candidate;
+        gamepadState.index = candidate.index;
+        break;
+      }
+    }
+  }
+
+  if (!pad) {
+    if (gamepadState.connected) {
+      gamepadState.connected = false;
+      releaseGamepadControls();
+    }
+    gamepadState.moveX = 0;
+    gamepadState.moveY = 0;
+    gamepadState.lookX = 0;
+    gamepadState.lookY = 0;
+    return;
+  }
+
+  gamepadState.connected = true;
+
+  const axis0 = pad.axes?.[0] ?? 0;
+  const axis1 = pad.axes?.[1] ?? 0;
+  const axis2 = pad.axes?.[2] ?? 0;
+  const axis3 = pad.axes?.[3] ?? 0;
+
+  gamepadState.moveX = THREE.MathUtils.clamp(applyDeadzone(axis0, GAMEPAD_MOVE_DEADZONE), -1, 1);
+  gamepadState.moveY = THREE.MathUtils.clamp(applyDeadzone(-axis1, GAMEPAD_MOVE_DEADZONE), -1, 1);
+  gamepadState.lookX = THREE.MathUtils.clamp(applyDeadzone(axis2, GAMEPAD_LOOK_DEADZONE), -1, 1);
+  gamepadState.lookY = THREE.MathUtils.clamp(applyDeadzone(-axis3, GAMEPAD_LOOK_DEADZONE), -1, 1);
+
+  const buttons = pad.buttons ?? [];
+  const isPressed = (index, threshold = GAMEPAD_BUTTON_THRESHOLD) => {
+    const button = buttons[index];
+    if (!button) return false;
+    return button.pressed || button.value > threshold;
+  };
+
+  const handleButton = (index, onPress, onRelease, threshold) => {
+    const pressed = isPressed(index, threshold);
+    const prev = gamepadState.buttons[index] ?? false;
+    if (pressed && !prev && typeof onPress === 'function') onPress();
+    if (!pressed && prev && typeof onRelease === 'function') onRelease();
+    gamepadState.buttons[index] = pressed;
+  };
+
+  handleButton(0, () => {
+    sound.resume();
+    if (!worldReady) {
+      if (!loadingInProgress) startWorldLoading();
+      return;
+    }
+    if (!controls.isLocked) {
+      controls.lock();
+      return;
+    }
+    setMovementState('Space', true);
+  }, () => {
+    if (controls.isLocked) setMovementState('Space', false);
+  });
+
+  handleButton(9, () => {
+    sound.resume();
+    if (!worldReady) {
+      if (!loadingInProgress) startWorldLoading();
+      return;
+    }
+    if (!controls.isLocked) {
+      controls.lock();
+    }
+  });
+
+  handleButton(4, () => {
+    setMovementState('ShiftLeft', true);
+  }, () => {
+    setMovementState('ShiftLeft', false);
+  });
+
+  const breakAction = () => {
+    if (!controls.isLocked) {
+      if (worldReady && !loadingInProgress) controls.lock();
+      return;
+    }
+    attemptBreakBlock();
+  };
+
+  const placeAction = () => {
+    if (!controls.isLocked) {
+      if (worldReady && !loadingInProgress) controls.lock();
+      return;
+    }
+    attemptPlaceBlock();
+  };
+
+  handleButton(5, breakAction, null);
+  handleButton(7, breakAction, null, GAMEPAD_TRIGGER_THRESHOLD);
+  handleButton(6, placeAction, null, GAMEPAD_TRIGGER_THRESHOLD);
+
+  handleButton(14, () => {
+    handleInventoryWheel(-1);
+  });
+
+  handleButton(15, () => {
+    handleInventoryWheel(1);
+  });
+
 }

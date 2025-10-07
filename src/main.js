@@ -836,6 +836,8 @@ function updatePhysics(delta) {
   if (!collidesAt(object.position)) {
     lastSafePosition.copy(object.position);
   }
+
+  world.updatePlayerPosition(object.position);
 }
 
 function animate() {
@@ -924,6 +926,7 @@ function finalizeWorldLoad() {
   spawn = world.getSpawnPoint();
   controls.getObject().position.copy(spawn);
   controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
+  world.updatePlayerPosition(controls.getObject().position);
   lastSafePosition.copy(controls.getObject().position);
   currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
   takeoffGroundHeight = currentGroundHeight;

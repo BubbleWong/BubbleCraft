@@ -345,9 +345,9 @@ function chunkTasksInSpiral(radius) {
     const da = a.cx * a.cx + a.cz * a.cz;
     const db = b.cx * b.cx + b.cz * b.cz;
     if (da !== db) return da - db;
-    const ma = Math.abs(a.cx) + Math.abs(a.cz);
-    const mb = Math.abs(b.cx) + Math.abs(b.cz);
-    if (ma !== mb) return ma - mb;
+    const angleA = a.cx === 0 && a.cz === 0 ? 0 : (Math.atan2(a.cz, a.cx) + Math.PI * 2) % (Math.PI * 2);
+    const angleB = b.cx === 0 && b.cz === 0 ? 0 : (Math.atan2(b.cz, b.cx) + Math.PI * 2) % (Math.PI * 2);
+    if (angleA !== angleB) return angleA - angleB;
     if (a.cx !== b.cx) return a.cx - b.cx;
     return a.cz - b.cz;
   });
@@ -363,6 +363,7 @@ class Chunk {
     this.origin = new THREE.Vector3(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.mesh = null;
+    this.rebuildInFlight = false;
     this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
     this.geometryVersion = 0;
@@ -544,14 +545,8 @@ class Chunk {
   }
 
   rebuild() {
-    if (this.mesh) {
-      this.world.scene.remove(this.mesh);
-      this.world.chunkMeshes.delete(this.mesh);
-      this.mesh.geometry.dispose();
-    }
-    this.mesh = null;
     this.geometryVersion += 1;
-    this.world.requestChunkGeometry(this, this.geometryVersion);
+    this.world.queueChunkRebuild(this);
   }
 }
 
@@ -560,6 +555,14 @@ export class World {
     this.scene = scene;
     this.chunks = new Map();
     this.chunkMeshes = new Set();
+    this.pendingRebuilds = new Map();
+    this.activeRebuilds = 0;
+    let concurrency = 2;
+    if (typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)) {
+      concurrency = Math.max(1, Math.min(4, Math.floor(navigator.hardwareConcurrency / 2)));
+    }
+    this.maxConcurrentRebuilds = concurrency;
+    this.playerPosition = new THREE.Vector3(0, 0, 0);
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.noise = new ImprovedNoise();
     this.seed = Math.floor(Math.random() * 2 ** 31);
@@ -604,6 +607,69 @@ export class World {
       chunk.rebuild();
     }
     return chunk;
+  }
+
+  queueChunkRebuild(chunk) {
+    if (!chunk) return;
+    const version = chunk.geometryVersion;
+    const existing = this.pendingRebuilds.get(chunk);
+    if (existing) {
+      existing.version = version;
+    } else {
+      this.pendingRebuilds.set(chunk, { chunk, version });
+    }
+    this.processRebuildQueue();
+  }
+
+  updatePlayerPosition(position) {
+    if (!position) return;
+    this.playerPosition.copy(position);
+    this.processRebuildQueue();
+  }
+
+  processRebuildQueue() {
+    if (!this.worker) return;
+    while (this.activeRebuilds < this.maxConcurrentRebuilds) {
+      const next = this.pickNextChunkForRebuild();
+      if (!next) break;
+      this.pendingRebuilds.delete(next.chunk);
+      next.chunk.rebuildInFlight = true;
+      this.activeRebuilds += 1;
+      this.requestChunkGeometry(next.chunk, next.version);
+    }
+  }
+
+  pickNextChunkForRebuild() {
+    let best = null;
+    let bestPriority = Infinity;
+    for (const entry of this.pendingRebuilds.values()) {
+      const { chunk } = entry;
+      if (!chunk || chunk.rebuildInFlight) continue;
+      const priority = this.computeChunkPriority(chunk);
+      const bestVersion = best ? best.version : -Infinity;
+      if (
+        priority < bestPriority - 1e-6 ||
+        (Math.abs(priority - bestPriority) <= 1e-6 && bestVersion < entry.version)
+      ) {
+        best = entry;
+        bestPriority = priority;
+      }
+    }
+    return best;
+  }
+
+  computeChunkPriority(chunk) {
+    const centerX = chunk.origin.x + CHUNK_SIZE * 0.5;
+    const centerZ = chunk.origin.z + CHUNK_SIZE * 0.5;
+    const dx = centerX - this.playerPosition.x;
+    const dz = centerZ - this.playerPosition.z;
+    return dx * dx + dz * dz;
+  }
+
+  finishChunkRebuild(chunk) {
+    chunk.rebuildInFlight = false;
+    if (this.activeRebuilds > 0) this.activeRebuilds -= 1;
+    this.processRebuildQueue();
   }
 
   getBlock(x, y, z) {
@@ -721,15 +787,25 @@ export class World {
     this.workerTasks.delete(id);
     const { chunk } = task;
     if (version !== chunk.geometryVersion) {
-      // Outdated result; drop it.
+      this.finishChunkRebuild(chunk);
       return;
     }
     if (error) {
       console.error('Chunk geometry worker message error:', error);
+      this.finishChunkRebuild(chunk);
       return;
     }
+
+    const previousMesh = chunk.mesh;
+
     if (!positions || positions.length === 0) {
+      if (previousMesh) {
+        this.scene.remove(previousMesh);
+        this.chunkMeshes.delete(previousMesh);
+        previousMesh.geometry.dispose();
+      }
       chunk.mesh = null;
+      this.finishChunkRebuild(chunk);
       return;
     }
 
@@ -744,9 +820,17 @@ export class World {
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.userData.chunk = chunk;
+
+    if (previousMesh) {
+      this.scene.remove(previousMesh);
+      this.chunkMeshes.delete(previousMesh);
+      previousMesh.geometry.dispose();
+    }
+
     chunk.mesh = mesh;
     this.scene.add(mesh);
     this.chunkMeshes.add(mesh);
+    this.finishChunkRebuild(chunk);
   }
 
   applyChunkCounts(chunk, delta) {

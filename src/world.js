@@ -333,7 +333,7 @@ function emitDetailedFace(
 
 const chunkKey = (cx, cz) => `${cx},${cz}`;
 
-function chunkTasksInSpiral(radius) {
+function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
   const tasks = [];
   for (let cx = -radius; cx <= radius; cx += 1) {
     for (let cz = -radius; cz <= radius; cz += 1) {
@@ -341,12 +341,62 @@ function chunkTasksInSpiral(radius) {
     }
   }
 
+  let px = 0;
+  let pz = 0;
+  if (playerPosition && typeof playerPosition.x === 'number' && typeof playerPosition.z === 'number') {
+    px = playerPosition.x;
+    pz = playerPosition.z;
+  }
+
+  let fx = 0;
+  let fz = 0;
+  let hasForward = false;
+  if (forward) {
+    const magnitudeSq = (forward.x ?? 0) * (forward.x ?? 0) + (forward.z ?? 0) * (forward.z ?? 0);
+    if (magnitudeSq > 1e-6) {
+      const magnitude = Math.sqrt(magnitudeSq);
+      fx = (forward.x ?? 0) / magnitude;
+      fz = (forward.z ?? 0) / magnitude;
+      hasForward = true;
+    }
+  }
+
   tasks.sort((a, b) => {
-    const da = a.cx * a.cx + a.cz * a.cz;
-    const db = b.cx * b.cx + b.cz * b.cz;
-    if (da !== db) return da - db;
-    const angleA = a.cx === 0 && a.cz === 0 ? 0 : (Math.atan2(a.cz, a.cx) + Math.PI * 2) % (Math.PI * 2);
-    const angleB = b.cx === 0 && b.cz === 0 ? 0 : (Math.atan2(b.cz, b.cx) + Math.PI * 2) % (Math.PI * 2);
+    const centerAx = a.cx * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+    const centerAz = a.cz * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+    const centerBx = b.cx * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+    const centerBz = b.cz * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+
+    const dxA = centerAx - px;
+    const dzA = centerAz - pz;
+    const dxB = centerBx - px;
+    const dzB = centerBz - pz;
+
+    const distASquared = dxA * dxA + dzA * dzA;
+    const distBSquared = dxB * dxB + dzB * dzB;
+
+    if (distASquared !== distBSquared) return distASquared - distBSquared;
+
+    if (hasForward) {
+      let dotA = 1;
+      let dotB = 1;
+
+      if (distASquared > 1e-6) {
+        const distanceA = Math.sqrt(distASquared);
+        dotA = (dxA / distanceA) * fx + (dzA / distanceA) * fz;
+      }
+      if (distBSquared > 1e-6) {
+        const distanceB = Math.sqrt(distBSquared);
+        dotB = (dxB / distanceB) * fx + (dzB / distanceB) * fz;
+      }
+
+      if (Math.abs(dotA - dotB) > 1e-6) {
+        return dotB - dotA;
+      }
+    }
+
+    const angleA = distASquared <= 1e-6 ? 0 : (Math.atan2(dzA, dxA) + Math.PI * 2) % (Math.PI * 2);
+    const angleB = distBSquared <= 1e-6 ? 0 : (Math.atan2(dzB, dxB) + Math.PI * 2) % (Math.PI * 2);
     if (angleA !== angleB) return angleA - angleB;
     if (a.cx !== b.cx) return a.cx - b.cx;
     return a.cz - b.cz;
@@ -625,19 +675,33 @@ export class World {
     if (!position) return;
     this.playerPosition.copy(position);
     if (viewDirection) {
-      this.playerForwardScratch.copy(viewDirection);
-      this.playerForwardScratch.y = 0;
-      const lenSq = this.playerForwardScratch.lengthSq();
-      if (lenSq > 1e-6) {
-        const len = Math.sqrt(lenSq);
-        this.playerForward.set(
-          this.playerForwardScratch.x / len,
-          0,
-          this.playerForwardScratch.z / len,
-        );
-      }
+      this.applyViewDirection(viewDirection);
     }
     this.processRebuildQueue();
+  }
+
+  updatePlayerView(viewDirection) {
+    if (!viewDirection) return;
+    const changed = this.applyViewDirection(viewDirection);
+    if (changed) {
+      this.processRebuildQueue();
+    }
+  }
+
+  applyViewDirection(viewDirection) {
+    if (!viewDirection) return false;
+    this.playerForwardScratch.copy(viewDirection);
+    this.playerForwardScratch.y = 0;
+    const lenSq = this.playerForwardScratch.lengthSq();
+    if (lenSq <= 1e-6) return false;
+    const len = Math.sqrt(lenSq);
+    const nx = this.playerForwardScratch.x / len;
+    const nz = this.playerForwardScratch.z / len;
+    if (Math.abs(nx - this.playerForward.x) <= 1e-4 && Math.abs(nz - this.playerForward.z) <= 1e-4) {
+      return false;
+    }
+    this.playerForward.set(nx, 0, nz);
+    return true;
   }
 
   processRebuildQueue() {
@@ -747,13 +811,13 @@ export class World {
   }
 
   generate(radius = 2) {
-    for (const { cx, cz } of chunkTasksInSpiral(radius)) {
+    for (const { cx, cz } of chunkTasksInSpiral(radius, this.playerPosition, this.playerForward)) {
       this.ensureChunk(cx, cz);
     }
   }
 
   async generateAsync(radius = 2, onProgress = null) {
-    const tasks = chunkTasksInSpiral(radius);
+    const tasks = chunkTasksInSpiral(radius, this.playerPosition, this.playerForward);
 
     const total = tasks.length;
     if (total === 0) {

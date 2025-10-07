@@ -885,6 +885,8 @@ async function startWorldLoading() {
   showLoadingOverlay();
   if (loadingLabel) loadingLabel.textContent = 'Loading world…';
   controls.lock();
+  camera.getWorldDirection(cameraDirection);
+  world.updatePlayerView(cameraDirection);
   try {
     await world.generateAsync(1, (progress) => setLoadingProgress(progress * 0.75));
     finalizeWorldLoad();

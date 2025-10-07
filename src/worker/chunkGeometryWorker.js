@@ -334,6 +334,12 @@ const computeNormal = (a, b, c) => vecNormalize(vecCross(vecSub(b, a), vecSub(c,
 const lightenColor = (color, amount) => mixColor(color, WHITE, amount);
 const darkenColor = (color, amount) => mixColor(color, BLACK, amount);
 
+const adjustRandomColor = (color, random, worldX, worldY, worldZ, salt, magnitude = 0.12) => {
+  const offset = random.random3D(worldX, worldY, worldZ, salt) * 2 - 1;
+  if (offset >= 0) return lightenColor(color, offset * magnitude);
+  return darkenColor(color, -offset * magnitude);
+};
+
 function emitQuadDoubleSided(positions, normals, colors, vertices, vertexColors) {
   const [v0, v1, v2, v3] = vertices;
   let normal = computeNormal(v0, v1, v2);
@@ -583,7 +589,14 @@ function addFlowerGeometry(
   const centerX = lx + 0.5;
   const centerZ = lz + 0.5;
   const paletteIndex = Math.floor(random.random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
-  const palette = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
+  const paletteBase = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
+
+  const palette = {
+    petalBase: adjustRandomColor(paletteBase.petalBase, random, worldX, worldY, worldZ, 701, 0.18),
+    petalEdge: adjustRandomColor(paletteBase.petalEdge, random, worldX, worldY, worldZ, 703, 0.18),
+    petalCenter: adjustRandomColor(paletteBase.petalCenter, random, worldX, worldY, worldZ, 705, 0.16),
+    center: adjustRandomColor(paletteBase.center ?? FLOWER_CENTER_COLOR, random, worldX, worldY, worldZ, 707, 0.08),
+  };
 
   const stemHeight = 0.55 + random.random3D(worldX, worldY, worldZ, 502) * 0.4;
   const stemBottom = [centerX, y, centerZ];
@@ -643,6 +656,28 @@ function addFlowerGeometry(
   if (random.random3D(worldX, worldY, worldZ, 764) > 0.45) {
     const secondaryCount = petalCount - 1;
     if (secondaryCount >= 3) {
+      const secondaryPalette = {
+        petalBase: adjustRandomColor(
+          mixColor(palette.petalBase, palette.petalEdge, 0.25),
+          random,
+          worldX,
+          worldY,
+          worldZ,
+          812,
+          0.12,
+        ),
+        petalEdge: lightenColor(adjustRandomColor(palette.petalEdge, random, worldX, worldY, worldZ, 814, 0.1), 0.1),
+        petalCenter: adjustRandomColor(
+          mixColor(palette.petalCenter, palette.petalBase, 0.35),
+          random,
+          worldX,
+          worldY,
+          worldZ,
+          816,
+          0.12,
+        ),
+      };
+
       addPetalLayer(
         positions,
         normals,
@@ -653,11 +688,7 @@ function addFlowerGeometry(
         layerRadius * 0.65,
         secondaryCount,
         rotation + Math.PI / petalCount,
-        {
-          petalBase: mixColor(palette.petalBase, palette.petalEdge, 0.2),
-          petalEdge: lightenColor(palette.petalEdge, 0.15),
-          petalCenter: mixColor(palette.petalCenter, palette.petalBase, 0.4),
-        },
+        secondaryPalette,
         random,
         worldX,
         worldY,

@@ -78,6 +78,48 @@ export const FLOWER_COLOR_VARIANTS = [
     petalCenter: [0.82, 0.4, 0.72],
     center: [0.99, 0.95, 0.83],
   },
+  {
+    petalBase: [0.74, 0.28, 0.78],
+    petalEdge: [0.93, 0.67, 0.95],
+    petalCenter: [0.42, 0.11, 0.47],
+    center: [0.96, 0.86, 0.96],
+  },
+  {
+    petalBase: [0.57, 0.34, 0.92],
+    petalEdge: [0.82, 0.66, 0.97],
+    petalCenter: [0.32, 0.17, 0.6],
+    center: [0.9, 0.84, 0.97],
+  },
+  {
+    petalBase: [0.44, 0.61, 0.96],
+    petalEdge: [0.73, 0.83, 0.99],
+    petalCenter: [0.21, 0.32, 0.67],
+    center: [0.88, 0.92, 0.99],
+  },
+  {
+    petalBase: [0.94, 0.52, 0.62],
+    petalEdge: [0.99, 0.78, 0.86],
+    petalCenter: [0.74, 0.26, 0.4],
+    center: [0.99, 0.89, 0.84],
+  },
+  {
+    petalBase: [0.88, 0.24, 0.42],
+    petalEdge: [0.97, 0.61, 0.72],
+    petalCenter: [0.63, 0.11, 0.28],
+    center: [0.99, 0.8, 0.78],
+  },
+  {
+    petalBase: [0.52, 0.8, 0.68],
+    petalEdge: [0.77, 0.93, 0.84],
+    petalCenter: [0.26, 0.55, 0.43],
+    center: [0.9, 0.96, 0.87],
+  },
+  {
+    petalBase: [0.82, 0.7, 0.24],
+    petalEdge: [0.95, 0.88, 0.56],
+    petalCenter: [0.58, 0.46, 0.12],
+    center: [0.97, 0.9, 0.66],
+  },
 ];
 
 export const FLOWER_UI_COLOR = [0.95, 0.66, 0.84];

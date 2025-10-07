@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import { PointerLockControls } from './vendor/PointerLockControls.js';
 import { World, BLOCK_TYPES, CHUNK_HEIGHT, BLOCK_TYPE_LABELS } from './world.js';
-import { BLOCK_COLORS, FLOWER_PETAL_COLORS } from './constants.js';
+import { BLOCK_COLORS, FLOWER_UI_COLOR } from './constants.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
@@ -35,8 +35,7 @@ const MATERIAL_SOUND_PROFILE = {
   [BLOCK_TYPES.leaves]: { stepCutoff: 1600, breakCutoff: 1900, breakQ: 0.7, placeFreq: 560 },
   [BLOCK_TYPES.gold]: { stepCutoff: 800, breakCutoff: 950, breakQ: 1.6, placeFreq: 300 },
   [BLOCK_TYPES.diamond]: { stepCutoff: 1100, breakCutoff: 1300, breakQ: 1.9, placeFreq: 620 },
-  [BLOCK_TYPES.flowerRed]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 640 },
-  [BLOCK_TYPES.flowerYellow]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 660 },
+  [BLOCK_TYPES.flower]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 650 },
   default: { stepCutoff: 1100, breakCutoff: 1400, breakQ: 1.1, placeFreq: 420 },
 };
 
@@ -330,7 +329,8 @@ const gamepadState = {
 };
 
 function blockColorToCss(type) {
-  const base = BLOCK_COLORS[type] ?? FLOWER_PETAL_COLORS[type];
+  let base = BLOCK_COLORS[type];
+  if (!base && type === BLOCK_TYPES.flower) base = FLOWER_UI_COLOR;
   if (!base) return 'rgba(255, 255, 255, 0.2)';
   const [r, g, b] = base.map((channel) => Math.round(channel * 255));
   return `rgb(${r}, ${g}, ${b})`;

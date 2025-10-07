@@ -6,16 +6,12 @@ import {
   BLOCK_TYPES,
   BLOCK_TYPE_LABELS,
   BLOCK_COLORS,
-  FLOWER_PETAL_COLORS,
-  FLOWER_CENTER_COLOR,
-  FLOWER_STEM_COLOR,
 } from './constants.js';
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
-const isTransparentBlock = (blockType) =>
-  blockType === BLOCK_TYPES.flowerRed || blockType === BLOCK_TYPES.flowerYellow;
+const isTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -449,8 +445,7 @@ class Chunk {
           } else if (terrainHeight + 1 < CHUNK_HEIGHT) {
             const flowerChance = this.world.random2D(worldX, worldZ, 91);
             if (flowerChance > 0.7) {
-              const flowerType = flowerChance > 0.88 ? BLOCK_TYPES.flowerRed : BLOCK_TYPES.flowerYellow;
-              this.set(lx, terrainHeight + 1, lz, flowerType);
+              this.set(lx, terrainHeight + 1, lz, BLOCK_TYPES.flower);
             }
           }
         }
@@ -537,8 +532,7 @@ class Chunk {
       if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && this.get(fx, flowerY, fz) === BLOCK_TYPES.air) {
         const chance = this.world.random2D(worldX + dx * 3, worldZ + dz * 3, 127);
         if (chance > 0.65) {
-          const flowerType = chance > 0.85 ? BLOCK_TYPES.flowerRed : BLOCK_TYPES.flowerYellow;
-          this.set(fx, flowerY, fz, flowerType);
+          this.set(fx, flowerY, fz, BLOCK_TYPES.flower);
         }
       }
     }

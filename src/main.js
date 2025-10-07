@@ -16,6 +16,183 @@ const inventoryBar = document.getElementById('inventory');
 
 const HOTBAR_SLOT_COUNT = 9;
 const MAX_STACK_SIZE = 64;
+const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
+
+const MATERIAL_SOUND_PROFILE = {
+  [BLOCK_TYPES.grass]: { stepCutoff: 1200, breakCutoff: 1500, breakQ: 1.2, placeFreq: 440 },
+  [BLOCK_TYPES.dirt]: { stepCutoff: 900, breakCutoff: 900, breakQ: 1.4, placeFreq: 410 },
+  [BLOCK_TYPES.stone]: { stepCutoff: 650, breakCutoff: 700, breakQ: 1.8, placeFreq: 330 },
+  [BLOCK_TYPES.sand]: { stepCutoff: 1400, breakCutoff: 1800, breakQ: 0.8, placeFreq: 520 },
+  [BLOCK_TYPES.wood]: { stepCutoff: 1000, breakCutoff: 1200, breakQ: 1.5, placeFreq: 360 },
+  [BLOCK_TYPES.leaves]: { stepCutoff: 1600, breakCutoff: 1900, breakQ: 0.7, placeFreq: 560 },
+  [BLOCK_TYPES.gold]: { stepCutoff: 800, breakCutoff: 950, breakQ: 1.6, placeFreq: 300 },
+  [BLOCK_TYPES.diamond]: { stepCutoff: 1100, breakCutoff: 1300, breakQ: 1.9, placeFreq: 620 },
+  [BLOCK_TYPES.flowerRed]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 640 },
+  [BLOCK_TYPES.flowerYellow]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 660 },
+  default: { stepCutoff: 1100, breakCutoff: 1400, breakQ: 1.1, placeFreq: 420 },
+};
+
+class SoundManager {
+  constructor() {
+    this.context = null;
+    this.masterGain = null;
+    this.fxGain = null;
+    this.musicGain = null;
+    this.bgmStarted = false;
+    this.bgmNodes = [];
+  }
+
+  ensureContext() {
+    if (this.context) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    this.context = new AudioCtx();
+    this.masterGain = this.context.createGain();
+    this.masterGain.gain.value = 0.6;
+    this.masterGain.connect(this.context.destination);
+
+    this.fxGain = this.context.createGain();
+    this.fxGain.gain.value = 0.8;
+    this.fxGain.connect(this.masterGain);
+
+    this.musicGain = this.context.createGain();
+    this.musicGain.gain.value = 0.22;
+    this.musicGain.connect(this.masterGain);
+  }
+
+  resume() {
+    this.ensureContext();
+    if (!this.context) return;
+    if (this.context.state === 'suspended') {
+      void this.context.resume();
+    }
+  }
+
+  playFootstep(blockType) {
+    this.ensureContext();
+    if (!this.context) return;
+    const profile = MATERIAL_SOUND_PROFILE[blockType] ?? MATERIAL_SOUND_PROFILE.default;
+    const buffer = this.makeNoiseBuffer(0.25);
+    const now = this.context.currentTime;
+    const src = this.context.createBufferSource();
+    src.buffer = buffer;
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = profile.stepCutoff + Math.random() * 200 - 100;
+    filter.Q.value = 1.2;
+    const gain = this.context.createGain();
+    gain.gain.value = 0.0;
+    src.connect(filter).connect(gain).connect(this.fxGain);
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.35, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    src.start(now);
+    src.stop(now + 0.25);
+  }
+
+  playJump() {
+    this.ensureContext();
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    const osc = this.context.createOscillator();
+    osc.type = 'triangle';
+    const gain = this.context.createGain();
+    gain.gain.value = 0.0;
+    osc.frequency.value = 420;
+    osc.connect(gain).connect(this.fxGain);
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.002, now + 0.32);
+    osc.frequency.exponentialRampToValueAtTime(260, now + 0.3);
+    osc.start(now);
+    osc.stop(now + 0.35);
+  }
+
+  playBlockBreak(blockType) {
+    this.ensureContext();
+    if (!this.context) return;
+    const profile = MATERIAL_SOUND_PROFILE[blockType] ?? MATERIAL_SOUND_PROFILE.default;
+    const now = this.context.currentTime;
+    const noise = this.context.createBufferSource();
+    noise.buffer = this.makeNoiseBuffer(0.35);
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = profile.breakCutoff + Math.random() * 250 - 120;
+    filter.Q.value = profile.breakQ ?? 1;
+    const gain = this.context.createGain();
+    gain.gain.value = 0;
+    noise.connect(filter).connect(gain).connect(this.fxGain);
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.45, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    noise.start(now);
+    noise.stop(now + 0.35);
+  }
+
+  playBlockPlace(blockType) {
+    this.ensureContext();
+    if (!this.context) return;
+    const profile = MATERIAL_SOUND_PROFILE[blockType] ?? MATERIAL_SOUND_PROFILE.default;
+    const now = this.context.currentTime;
+    const osc = this.context.createOscillator();
+    osc.type = 'sine';
+    const gain = this.context.createGain();
+    gain.gain.value = 0.0;
+    const baseFreq = profile.placeFreq ?? 420;
+    osc.frequency.value = baseFreq;
+    osc.connect(gain).connect(this.fxGain);
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.28, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.002, now + 0.22);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.9, now + 0.2);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
+  startBgm() {
+    this.ensureContext();
+    if (!this.context || this.bgmStarted) return;
+    this.bgmStarted = true;
+    const now = this.context.currentTime;
+    const voices = [
+      { freq: 196, type: 'sine', gain: 0.18, lfoFreq: 0.05 },
+      { freq: 246.94, type: 'triangle', gain: 0.14, lfoFreq: 0.07 },
+      { freq: 329.63, type: 'sawtooth', gain: 0.12, lfoFreq: 0.09 },
+    ];
+    for (const voice of voices) {
+      const osc = this.context.createOscillator();
+      osc.type = voice.type;
+      const gain = this.context.createGain();
+      gain.gain.value = 0;
+      osc.frequency.value = voice.freq;
+      osc.connect(gain).connect(this.musicGain);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(voice.gain, now + 3.5);
+      gain.gain.linearRampToValueAtTime(voice.gain * 0.92, now + 16 + Math.random() * 4);
+
+      const lfo = this.context.createOscillator();
+      const lfoGain = this.context.createGain();
+      lfo.frequency.value = voice.lfoFreq;
+      lfoGain.gain.value = voice.freq * 0.015;
+      lfo.connect(lfoGain).connect(osc.frequency);
+      lfo.start(now);
+
+      osc.start(now);
+      this.bgmNodes.push({ osc, gain, lfo, lfoGain });
+    }
+  }
+
+  makeNoiseBuffer(durationSeconds) {
+    if (!this.context) return null;
+    const length = Math.max(1, Math.floor(this.context.sampleRate * durationSeconds));
+    const buffer = this.context.createBuffer(1, length, this.context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    }
+    return buffer;
+  }
+}
 
 class Inventory {
   constructor(slotCount = HOTBAR_SLOT_COUNT) {
@@ -73,6 +250,7 @@ class Inventory {
 
 const inventory = new Inventory();
 let activeHotbarIndex = 0;
+const sound = new SoundManager();
 
 function blockColorToCss(type) {
   const base = BLOCK_COLORS[type] ?? FLOWER_PETAL_COLORS[type];
@@ -127,9 +305,11 @@ let wasGroundedPrevious = true;
 let takeoffGroundHeight = 0;
 const lastSafePosition = new THREE.Vector3();
 let lastCrosshairVisible = false;
+let footstepDistanceAccumulator = 0;
 
 overlay.addEventListener('click', () => {
   if (loadingInProgress) return;
+  sound.resume();
   if (worldReady) {
     controls.lock();
     return;
@@ -141,6 +321,7 @@ controls.addEventListener('lock', () => {
   if (worldReady) {
     overlay.classList.add('hidden');
   }
+  sound.resume();
   updateCrosshairVisibility();
 });
 
@@ -216,6 +397,7 @@ function setMovementState(code, pressed) {
       if (pressed && canJump) {
         velocity.y = jumpImpulse;
         canJump = false;
+        sound.playJump();
       }
       break;
     default:
@@ -261,6 +443,7 @@ document.addEventListener('mousedown', (event) => {
       if (blockType !== BLOCK_TYPES.air) {
         const removed = world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
         if (removed) {
+          sound.playBlockBreak(blockType);
           inventory.add(blockType, 1);
           updateInventoryUI();
         }
@@ -277,10 +460,12 @@ document.addEventListener('mousedown', (event) => {
       if (distance > 1.75) {
         const existing = world.getBlock(target.x, target.y, target.z);
         if (existing !== BLOCK_TYPES.air) return;
-        const placed = world.setBlock(target.x, target.y, target.z, activeSlot.type);
+        const placeType = activeSlot.type;
+        const placed = world.setBlock(target.x, target.y, target.z, placeType);
         if (placed) {
           inventory.removeFromSlot(activeHotbarIndex, 1);
           updateInventoryUI();
+          sound.playBlockPlace(placeType);
         }
       }
     }
@@ -496,6 +681,24 @@ function updatePhysics(delta) {
     canJump = false;
   }
 
+  const horizontalDistance = Math.hypot(object.position.x - previousPosition.x, object.position.z - previousPosition.z);
+  if (grounded && horizontalDistance > 0.01) {
+    footstepDistanceAccumulator += horizontalDistance;
+    if (footstepDistanceAccumulator >= FOOTSTEP_DISTANCE_INTERVAL) {
+      footstepDistanceAccumulator = 0;
+      const underX = Math.floor(object.position.x);
+      const underY = Math.floor(object.position.y - playerHeight - 0.1);
+      const underZ = Math.floor(object.position.z);
+      let blockType = world.getBlock(underX, underY, underZ);
+      if (blockType === BLOCK_TYPES.air) {
+        blockType = world.getBlock(underX, underY - 1, underZ);
+      }
+      sound.playFootstep(blockType);
+    }
+  } else if (!grounded || horizontalDistance <= 0.01) {
+    footstepDistanceAccumulator = 0;
+  }
+
   wasGroundedPrevious = grounded;
   resolvePenetration(object.position, velocity);
 
@@ -598,6 +801,8 @@ function finalizeWorldLoad() {
   updateHUD();
   updateFPSHud(0);
   updateInventoryUI();
+  sound.resume();
+  sound.startBgm();
   updateCrosshairVisibility();
 }
 

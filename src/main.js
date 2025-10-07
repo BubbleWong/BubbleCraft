@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import { PointerLockControls } from './vendor/PointerLockControls.js';
 import { World, BLOCK_TYPES, CHUNK_HEIGHT, BLOCK_TYPE_LABELS } from './world.js';
+import { BLOCK_COLORS, FLOWER_PETAL_COLORS } from './constants.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
@@ -11,6 +12,76 @@ const loadingLabel = document.getElementById('loading-label');
 const loadingBar = document.getElementById('loading-bar');
 const loadingPercent = document.getElementById('loading-percent');
 const crosshair = document.getElementById('crosshair');
+const inventoryBar = document.getElementById('inventory');
+
+const HOTBAR_SLOT_COUNT = 9;
+const MAX_STACK_SIZE = 64;
+
+class Inventory {
+  constructor(slotCount = HOTBAR_SLOT_COUNT) {
+    this.slotCount = slotCount;
+    this.slots = Array.from({ length: slotCount }, () => null);
+  }
+
+  getSlot(index) {
+    if (index < 0 || index >= this.slotCount) return null;
+    return this.slots[index];
+  }
+
+  add(type, amount = 1) {
+    if (type === BLOCK_TYPES.air || amount <= 0) return amount;
+    let remaining = amount;
+    for (let i = 0; i < this.slotCount && remaining > 0; i += 1) {
+      const slot = this.slots[i];
+      if (slot && slot.type === type && slot.count < MAX_STACK_SIZE) {
+        const space = MAX_STACK_SIZE - slot.count;
+        const toTransfer = Math.min(space, remaining);
+        slot.count += toTransfer;
+        remaining -= toTransfer;
+      }
+    }
+    for (let i = 0; i < this.slotCount && remaining > 0; i += 1) {
+      if (!this.slots[i]) {
+        const toTransfer = Math.min(MAX_STACK_SIZE, remaining);
+        this.slots[i] = { type, count: toTransfer };
+        remaining -= toTransfer;
+      }
+    }
+    return remaining;
+  }
+
+  removeFromSlot(index, amount = 1) {
+    if (index < 0 || index >= this.slotCount || amount <= 0) return 0;
+    const slot = this.slots[index];
+    if (!slot) return 0;
+    const removed = Math.min(slot.count, amount);
+    slot.count -= removed;
+    if (slot.count === 0) this.slots[index] = null;
+    return removed;
+  }
+
+  findNextFilledSlot(startIndex, direction) {
+    if (this.slotCount === 0) return -1;
+    let index = startIndex;
+    for (let i = 0; i < this.slotCount; i += 1) {
+      index = (index + direction + this.slotCount) % this.slotCount;
+      if (this.slots[index]) return index;
+    }
+    return -1;
+  }
+}
+
+const inventory = new Inventory();
+let activeHotbarIndex = 0;
+
+function blockColorToCss(type) {
+  const base = BLOCK_COLORS[type] ?? FLOWER_PETAL_COLORS[type];
+  if (!base) return 'rgba(255, 255, 255, 0.2)';
+  const [r, g, b] = base.map((channel) => Math.round(channel * 255));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+updateInventoryUI();
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -47,6 +118,7 @@ let loadingInProgress = false;
 
 if (hud) hud.classList.add('hidden');
 if (crosshair) crosshair.classList.add('hidden');
+if (inventoryBar) inventoryBar.classList.add('hidden');
 
 let spawn = new THREE.Vector3();
 let currentGroundHeight = 0;
@@ -155,7 +227,9 @@ const LOOK_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 document.addEventListener('keydown', (event) => {
   if (event.repeat) return;
+  const handledInventory = handleInventoryKeyDown(event);
   if (LOOK_KEYS.has(event.code)) event.preventDefault();
+  if (handledInventory) event.preventDefault();
   setMovementState(event.code, true);
 });
 
@@ -171,6 +245,11 @@ function refreshRaycaster() {
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 }
 
+document.addEventListener('wheel', (event) => {
+  if (!controls.isLocked) return;
+  if (handleInventoryWheel(event.deltaY)) event.preventDefault();
+}, { passive: false });
+
 document.addEventListener('mousedown', (event) => {
   if (!controls.isLocked) return;
   refreshRaycaster();
@@ -178,16 +257,31 @@ document.addEventListener('mousedown', (event) => {
   if (event.button === 0) {
     const target = world.getRaycastTarget(raycaster, { place: false });
     if (target) {
-      world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
+      const blockType = world.getBlock(target.x, target.y, target.z);
+      if (blockType !== BLOCK_TYPES.air) {
+        const removed = world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
+        if (removed) {
+          inventory.add(blockType, 1);
+          updateInventoryUI();
+        }
+      }
     }
   } else if (event.button === 2) {
     event.preventDefault();
+    const activeSlot = inventory.getSlot(activeHotbarIndex);
+    if (!activeSlot) return;
     const target = world.getRaycastTarget(raycaster, { place: true });
     if (target && target.y >= 0 && target.y < CHUNK_HEIGHT - 1) {
       const playerPos = controls.getObject().position;
       const distance = Math.hypot(target.x + 0.5 - playerPos.x, target.y + 0.5 - playerPos.y, target.z + 0.5 - playerPos.z);
       if (distance > 1.75) {
-        world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.grass);
+        const existing = world.getBlock(target.x, target.y, target.z);
+        if (existing !== BLOCK_TYPES.air) return;
+        const placed = world.setBlock(target.x, target.y, target.z, activeSlot.type);
+        if (placed) {
+          inventory.removeFromSlot(activeHotbarIndex, 1);
+          updateInventoryUI();
+        }
       }
     }
   }
@@ -484,6 +578,7 @@ function handleWorldLoadError() {
   overlay.classList.remove('hidden');
   worldReady = false;
   if (loadingLabel) loadingLabel.textContent = 'Failed to load world. Click to retry.';
+  if (inventoryBar) inventoryBar.classList.add('hidden');
   updateCrosshairVisibility();
 }
 
@@ -498,9 +593,11 @@ function finalizeWorldLoad() {
   wasGroundedPrevious = true;
   worldReady = true;
   if (hud) hud.classList.remove('hidden');
+  if (inventoryBar) inventoryBar.classList.remove('hidden');
   hudAccumulator = 0;
   updateHUD();
   updateFPSHud(0);
+  updateInventoryUI();
   updateCrosshairVisibility();
 }
 
@@ -592,4 +689,71 @@ function updateFPSHud(fps) {
   fpsSmoothed = fpsSmoothed === 0 ? clamped : fpsSmoothed * FPS_SMOOTH_FACTOR + clamped * (1 - FPS_SMOOTH_FACTOR);
   const display = fpsSmoothed < 0 ? 0 : fpsSmoothed;
   fpsHud.textContent = `FPS: ${display.toFixed(1)}`;
+}
+
+function ensureActiveSlot() {
+  if (inventory.getSlot(activeHotbarIndex)) return;
+  const fallback = inventory.findNextFilledSlot(activeHotbarIndex, 1);
+  activeHotbarIndex = fallback === -1 ? 0 : fallback;
+}
+
+function updateInventoryUI() {
+  if (!inventoryBar) return;
+  ensureActiveSlot();
+  inventoryBar.innerHTML = '';
+  for (let i = 0; i < inventory.slotCount; i += 1) {
+    const slot = inventory.getSlot(i);
+    const slotEl = document.createElement('div');
+    slotEl.className = 'inventory__slot';
+    if (i === activeHotbarIndex) slotEl.classList.add('inventory__slot--active');
+    if (slot) {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'inventory__item';
+      itemEl.style.backgroundColor = blockColorToCss(slot.type);
+      itemEl.textContent = BLOCK_TYPE_LABELS[slot.type] ?? `#${slot.type}`;
+      const countEl = document.createElement('span');
+      countEl.className = 'inventory__count';
+      countEl.textContent = String(slot.count);
+      slotEl.appendChild(itemEl);
+      slotEl.appendChild(countEl);
+    } else {
+      slotEl.classList.add('inventory__slot--empty');
+    }
+    inventoryBar.appendChild(slotEl);
+  }
+}
+
+function setActiveHotbarIndex(index) {
+  if (inventory.slotCount === 0) return;
+  const normalized = ((index % inventory.slotCount) + inventory.slotCount) % inventory.slotCount;
+  if (normalized === activeHotbarIndex) {
+    updateInventoryUI();
+    return;
+  }
+  activeHotbarIndex = normalized;
+  updateInventoryUI();
+}
+
+function handleInventoryKeyDown(event) {
+  if (event.code.startsWith('Digit')) {
+    const digit = Number(event.code.slice(-1));
+    if (digit >= 1 && digit <= inventory.slotCount) {
+      const targetIndex = digit - 1;
+      setActiveHotbarIndex(targetIndex);
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleInventoryWheel(deltaY) {
+  if (deltaY === 0 || inventory.slotCount === 0) return false;
+  const direction = deltaY > 0 ? 1 : -1;
+  let nextIndex = (activeHotbarIndex + direction + inventory.slotCount) % inventory.slotCount;
+  if (!inventory.getSlot(nextIndex)) {
+    const found = inventory.findNextFilledSlot(activeHotbarIndex, direction);
+    if (found !== -1) nextIndex = found;
+  }
+  setActiveHotbarIndex(nextIndex);
+  return true;
 }

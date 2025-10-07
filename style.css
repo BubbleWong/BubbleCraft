@@ -171,3 +171,77 @@ canvas#game {
   margin: 0;
   font-size: clamp(1rem, 2vw, 1.25rem);
 }
+
+.inventory {
+  position: fixed;
+  left: 50%;
+  bottom: 1.75rem;
+  transform: translate(-50%, 0);
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(10, 14, 20, 0.65);
+  border-radius: 0.9rem;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 11;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.inventory.hidden {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+
+.inventory__slot {
+  position: relative;
+  width: 4.5rem;
+  height: 3.2rem;
+  border-radius: 0.55rem;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  transition: border-color 120ms ease, transform 120ms ease;
+  overflow: hidden;
+}
+
+.inventory__slot--active {
+  border-color: rgba(255, 210, 102, 0.9);
+  box-shadow: 0 0 12px rgba(255, 210, 102, 0.6);
+  transform: translateY(-2px);
+}
+
+.inventory__slot--empty {
+  opacity: 0.25;
+}
+
+.inventory__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: #0b0d11;
+  padding: 0.35rem 0.4rem;
+  border-radius: 0.45rem;
+  text-align: center;
+  text-transform: uppercase;
+  line-height: 1.1;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.inventory__count {
+  position: absolute;
+  bottom: 0.3rem;
+  right: 0.45rem;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f8f8f8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}

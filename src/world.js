@@ -25,6 +25,10 @@ const FACE_DEFS = [
 const TRIANGLE_ORDER = [0, 1, 2, 0, 2, 3];
 const mix = (a, b, t) => a * (1 - t) + b * t;
 
+const CHUNK_PRIORITY_DIRECTION_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 6;
+const CHUNK_PRIORITY_BAND_STEP = Math.max(1, CHUNK_SIZE * 0.75);
+const CHUNK_PRIORITY_BAND_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 4;
+
 const TOP_FACE_INDEX = 2;
 const BOTTOM_FACE_INDEX = 3;
 
@@ -557,6 +561,8 @@ export class World {
     }
     this.maxConcurrentRebuilds = concurrency;
     this.playerPosition = new THREE.Vector3(0, 0, 0);
+    this.playerForward = new THREE.Vector3(0, 0, -1);
+    this.playerForwardScratch = new THREE.Vector3();
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.noise = new ImprovedNoise();
     this.seed = Math.floor(Math.random() * 2 ** 31);
@@ -615,9 +621,22 @@ export class World {
     this.processRebuildQueue();
   }
 
-  updatePlayerPosition(position) {
+  updatePlayerPosition(position, viewDirection = null) {
     if (!position) return;
     this.playerPosition.copy(position);
+    if (viewDirection) {
+      this.playerForwardScratch.copy(viewDirection);
+      this.playerForwardScratch.y = 0;
+      const lenSq = this.playerForwardScratch.lengthSq();
+      if (lenSq > 1e-6) {
+        const len = Math.sqrt(lenSq);
+        this.playerForward.set(
+          this.playerForwardScratch.x / len,
+          0,
+          this.playerForwardScratch.z / len,
+        );
+      }
+    }
     this.processRebuildQueue();
   }
 
@@ -657,7 +676,26 @@ export class World {
     const centerZ = chunk.origin.z + CHUNK_SIZE * 0.5;
     const dx = centerX - this.playerPosition.x;
     const dz = centerZ - this.playerPosition.z;
-    return dx * dx + dz * dz;
+    const distanceSquared = dx * dx + dz * dz;
+    const distance = Math.sqrt(distanceSquared);
+    let priority = distanceSquared;
+
+    if (distance > 1e-6) {
+      const normalizedX = dx / distance;
+      const normalizedZ = dz / distance;
+      const forward = this.playerForward;
+      const forwardDot = forward.x * normalizedX + forward.z * normalizedZ;
+      const clampedDot = Math.max(-1, Math.min(1, forwardDot));
+      const directionalFactor = 1 - ((clampedDot + 1) * 0.5);
+      priority += directionalFactor * CHUNK_PRIORITY_DIRECTION_WEIGHT;
+
+      const bandIndex = Math.floor(distance / CHUNK_PRIORITY_BAND_STEP);
+      if (bandIndex > 0) {
+        priority += bandIndex * CHUNK_PRIORITY_BAND_WEIGHT;
+      }
+    }
+
+    return priority;
   }
 
   finishChunkRebuild(chunk) {

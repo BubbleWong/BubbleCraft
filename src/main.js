@@ -358,6 +358,7 @@ scene.fog = new THREE.Fog(0x87ceeb, 75, 250);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 400);
 const controls = new PointerLockControls(camera, document.body);
 scene.add(controls.getObject());
+const cameraDirection = new THREE.Vector3();
 
 const hemisphere = new THREE.HemisphereLight(0xffffff, 0x506070, 0.55);
 scene.add(hemisphere);
@@ -837,7 +838,8 @@ function updatePhysics(delta) {
     lastSafePosition.copy(object.position);
   }
 
-  world.updatePlayerPosition(object.position);
+  camera.getWorldDirection(cameraDirection);
+  world.updatePlayerPosition(object.position, cameraDirection);
 }
 
 function animate() {
@@ -926,7 +928,8 @@ function finalizeWorldLoad() {
   spawn = world.getSpawnPoint();
   controls.getObject().position.copy(spawn);
   controls.getObject().position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
-  world.updatePlayerPosition(controls.getObject().position);
+  camera.getWorldDirection(cameraDirection);
+  world.updatePlayerPosition(controls.getObject().position, cameraDirection);
   lastSafePosition.copy(controls.getObject().position);
   currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
   takeoffGroundHeight = currentGroundHeight;

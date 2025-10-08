@@ -20,6 +20,7 @@ export const BLOCK_TYPES = {
   gold: 7,
   diamond: 8,
   flower: 9,
+  water: 10,
 };
 
 export const BLOCK_TYPE_LABELS = {
@@ -32,6 +33,7 @@ export const BLOCK_TYPE_LABELS = {
   [BLOCK_TYPES.gold]: 'Gold',
   [BLOCK_TYPES.diamond]: 'Diamond',
   [BLOCK_TYPES.flower]: 'Wildflower',
+  [BLOCK_TYPES.water]: 'Water',
 };
 
 export const BLOCK_COLORS = {
@@ -44,7 +46,10 @@ export const BLOCK_COLORS = {
   [BLOCK_TYPES.gold]: [0.97, 0.83, 0.36],
   [BLOCK_TYPES.diamond]: [0.53, 0.84, 0.92],
   [BLOCK_TYPES.flower]: [0.95, 0.66, 0.84],
+  [BLOCK_TYPES.water]: [0.18, 0.45, 0.82],
 };
+
+export const SEA_LEVEL = 20;
 
 export const FLOWER_CENTER_COLOR = [0.98, 0.94, 0.62];
 export const FLOWER_STEM_COLOR = [0.25, 0.65, 0.38];

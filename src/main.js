@@ -36,6 +36,7 @@ const MATERIAL_SOUND_PROFILE = {
   [BLOCK_TYPES.gold]: { stepCutoff: 800, breakCutoff: 950, breakQ: 1.6, placeFreq: 300 },
   [BLOCK_TYPES.diamond]: { stepCutoff: 1100, breakCutoff: 1300, breakQ: 1.9, placeFreq: 620 },
   [BLOCK_TYPES.flower]: { stepCutoff: 1700, breakCutoff: 2000, breakQ: 0.6, placeFreq: 650 },
+  [BLOCK_TYPES.water]: { stepCutoff: 1450, breakCutoff: 1200, breakQ: 0.9, placeFreq: 480 },
   default: { stepCutoff: 1100, breakCutoff: 1400, breakQ: 1.1, placeFreq: 420 },
 };
 
@@ -374,7 +375,7 @@ const MAX_JUMP_CLEARANCE = 0.1;
 const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
-const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
+const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower, BLOCK_TYPES.water]);
 const KEYBOARD_LOOK_YAW_SPEED = THREE.MathUtils.degToRad(150);
 const KEYBOARD_LOOK_PITCH_SPEED = THREE.MathUtils.degToRad(110);
 

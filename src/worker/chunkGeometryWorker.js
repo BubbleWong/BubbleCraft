@@ -6,6 +6,7 @@ import {
   FLOWER_COLOR_VARIANTS,
   FLOWER_CENTER_COLOR,
   FLOWER_STEM_COLOR,
+  SEA_LEVEL,
 } from '../constants.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
@@ -70,6 +71,7 @@ function getFaceResolution(blockType, faceIndex) {
   if (blockType === BLOCK_TYPES.leaves) return 6;
   if (blockType === BLOCK_TYPES.gold || blockType === BLOCK_TYPES.diamond) return 10;
   if (blockType === BLOCK_TYPES.sand) return 10;
+  if (blockType === BLOCK_TYPES.water && faceIndex === TOP_FACE_INDEX) return 10;
   return 8;
 }
 
@@ -199,6 +201,25 @@ function applyTextureDetail(blockType, baseColor, faceIndex, corner, worldX, wor
       if (pixelNoise(82) < 0.08) sand = mixColor(sand, sandShadow, 0.45);
       sand = sand.map((c, idx) => clamp01(c + (pixelNoise(83 + idx) - 0.5) * (idx === 1 ? 0.05 : 0.035)));
       return sand;
+    }
+    case BLOCK_TYPES.water: {
+      const shallowTint = [0.36, 0.65, 0.97];
+      const deepTint = [0.06, 0.16, 0.32];
+      const foamTint = [0.82, 0.94, 1.0];
+      const depth = clamp01((SEA_LEVEL - worldCornerY) / 8 + (pixelNoise(600) - 0.5) * 0.1);
+      let water = mixColor(baseColor, shallowTint, clamp01(0.45 + depth * 0.4));
+      if (faceIndex === TOP_FACE_INDEX) {
+        const ripple = Math.sin((worldCornerX + worldCornerZ) * 0.45 + pixelNoise(601) * Math.PI * 4) * 0.18;
+        const sparkle = pixelNoise(602) > 0.92 ? 0.25 : 0;
+        const surfaceMix = clamp01(0.35 + ripple + sparkle);
+        water = mixColor(water, foamTint, surfaceMix);
+      } else if (faceIndex === BOTTOM_FACE_INDEX) {
+        water = mixColor(water, deepTint, clamp01(0.6 + depth * 0.3));
+      } else {
+        const sideGradient = clamp01(0.5 + depth * 0.35 + (pixelNoise(603) - 0.5) * 0.15);
+        water = mixColor(water, deepTint, sideGradient);
+      }
+      return water.map((c, idx) => clamp01(c + (pixelNoise(604 + idx) - 0.5) * 0.05));
     }
     case BLOCK_TYPES.wood: {
       const barkDark = [0.3, 0.18, 0.08];

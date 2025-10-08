@@ -6,6 +6,7 @@ import {
   BLOCK_TYPES,
   BLOCK_TYPE_LABELS,
   BLOCK_COLORS,
+  SEA_LEVEL,
   EXTENDED_WORLD_RADIUS,
   ALWAYS_RENDER_RADIUS,
   VIEW_CULL_ANGLE_DEG,
@@ -15,7 +16,8 @@ const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const isTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
-const isPassableBlock = (blockType) => blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower;
+const isPassableBlock = (blockType) =>
+  blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -561,6 +563,16 @@ class Chunk {
             const flowerChance = this.world.random2D(worldX, worldZ, 91);
             if (flowerChance > 0.7) {
               this.set(lx, terrainHeight + 1, lz, BLOCK_TYPES.flower);
+            }
+          }
+        }
+
+        if (terrainHeight < SEA_LEVEL) {
+          const maxWaterY = Math.min(SEA_LEVEL, CHUNK_HEIGHT - 1);
+          for (let waterY = terrainHeight + 1; waterY <= maxWaterY; waterY += 1) {
+            const existing = this.get(lx, waterY, lz);
+            if (existing === BLOCK_TYPES.air || existing === BLOCK_TYPES.flower) {
+              this.set(lx, waterY, lz, BLOCK_TYPES.water);
             }
           }
         }

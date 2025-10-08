@@ -27,11 +27,13 @@ const FACE_DEFS = [
 const TRIANGLE_ORDER = [0, 1, 2, 0, 2, 3];
 const mix = (a, b, t) => a * (1 - t) + b * t;
 
-const CHUNK_PRIORITY_DIRECTION_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 6;
 const CHUNK_PRIORITY_BAND_STEP = Math.max(1, CHUNK_SIZE * 0.75);
 const CHUNK_PRIORITY_BAND_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 4;
-const CHUNK_URGENT_PRIORITY_WEIGHT = CHUNK_PRIORITY_DIRECTION_WEIGHT * 400;
+const CHUNK_URGENT_PRIORITY_WEIGHT = CHUNK_SIZE * CHUNK_SIZE * 6 * 400;
 const CHUNK_RECENCY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 4;
+
+const CHUNK_NEAR_PRIORITY_RADIUS = CHUNK_SIZE * 2;
+const CHUNK_NEAR_PRIORITY_BONUS = CHUNK_PRIORITY_BAND_WEIGHT * 8;
 
 const TOP_FACE_INDEX = 2;
 const BOTTOM_FACE_INDEX = 3;
@@ -800,15 +802,11 @@ export class World {
     const distance = Math.sqrt(distanceSquared);
     let priority = distanceSquared;
 
-    if (distance > 1e-6) {
-      const normalizedX = dx / distance;
-      const normalizedZ = dz / distance;
-      const forward = this.playerForward;
-      const forwardDot = forward.x * normalizedX + forward.z * normalizedZ;
-      const clampedDot = Math.max(-1, Math.min(1, forwardDot));
-      const directionalFactor = 1 - ((clampedDot + 1) * 0.5);
-      priority += directionalFactor * CHUNK_PRIORITY_DIRECTION_WEIGHT;
+    if (distance <= CHUNK_NEAR_PRIORITY_RADIUS) {
+      priority -= CHUNK_NEAR_PRIORITY_BONUS;
+    }
 
+    if (distance > 1e-6) {
       const bandIndex = Math.floor(distance / CHUNK_PRIORITY_BAND_STEP);
       if (bandIndex > 0) {
         priority += bandIndex * CHUNK_PRIORITY_BAND_WEIGHT;

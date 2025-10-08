@@ -374,6 +374,7 @@ const MAX_JUMP_CLEARANCE = 0.1;
 const PLAYER_RADIUS = 0.35;
 const FOOT_BUFFER = 0.05;
 const HEAD_BUFFER = 0.1;
+const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
 const KEYBOARD_LOOK_YAW_SPEED = THREE.MathUtils.degToRad(150);
 const KEYBOARD_LOOK_PITCH_SPEED = THREE.MathUtils.degToRad(110);
 
@@ -627,7 +628,8 @@ function collidesAt(position) {
     const blockX = Math.floor(px);
     const blockZ = Math.floor(pz);
     for (let by = minBlockY; by <= maxBlockY; by += 1) {
-      if (world.getBlock(blockX, by, blockZ) !== BLOCK_TYPES.air) {
+      const blockType = world.getBlock(blockX, by, blockZ);
+      if (!NON_COLLIDING_BLOCKS.has(blockType)) {
         return true;
       }
     }

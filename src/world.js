@@ -12,6 +12,7 @@ const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const isTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
+const isPassableBlock = (blockType) => blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower;
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -1004,7 +1005,8 @@ export class World {
     const lx = x - cx * CHUNK_SIZE;
     const lz = z - cz * CHUNK_SIZE;
     for (let y = CHUNK_HEIGHT - 1; y >= 0; y -= 1) {
-      if (chunk.get(lx, y, lz) !== BLOCK_TYPES.air) {
+      const blockType = chunk.get(lx, y, lz);
+      if (!isPassableBlock(blockType)) {
         return y + 1;
       }
     }
@@ -1023,7 +1025,8 @@ export class World {
     let top = Math.min(Math.floor(maxY), CHUNK_HEIGHT - 1);
     if (Number.isNaN(top)) top = CHUNK_HEIGHT - 1;
     for (let y = top; y >= 0; y -= 1) {
-      if (chunk.get(lx, y, lz) !== BLOCK_TYPES.air) {
+      const blockType = chunk.get(lx, y, lz);
+      if (!isPassableBlock(blockType)) {
         return y + 1;
       }
     }

@@ -10,7 +10,8 @@ import {
 } from '../constants.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
-const isTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
+const isFullyTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
+const isTranslucentBlock = (blockType) => blockType === BLOCK_TYPES.water;
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -874,8 +875,11 @@ function buildChunkGeometry(payload) {
         for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
           const face = FACE_DEFS[faceIndex];
           const neighborType = getBlockAt(lx + face.dir[0], y + face.dir[1], lz + face.dir[2], blocks, neighbors);
-          const isTransparentNeighbor = neighborType === BLOCK_TYPES.air || isTransparentBlock(neighborType);
-          if (!isTransparentNeighbor) continue;
+          const neighborTransparent =
+            neighborType === BLOCK_TYPES.air ||
+            isFullyTransparentBlock(neighborType) ||
+            (isTranslucentBlock(neighborType) && blockType !== BLOCK_TYPES.water);
+          if (!neighborTransparent) continue;
 
           emitDetailedFace(
             positions,

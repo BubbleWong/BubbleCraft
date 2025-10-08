@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import { PointerLockControls } from './vendor/PointerLockControls.js';
 import { World, BLOCK_TYPES, CHUNK_HEIGHT, BLOCK_TYPE_LABELS } from './world.js';
-import { BLOCK_COLORS, FLOWER_UI_COLOR, INITIAL_WORLD_RADIUS, EXTENDED_WORLD_RADIUS } from './constants.js';
+import { BLOCK_COLORS, FLOWER_UI_COLOR, DEFAULT_RENDER_DISTANCE } from './constants.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
@@ -891,14 +891,8 @@ async function startWorldLoading() {
   camera.getWorldDirection(cameraDirection);
   world.updatePlayerView(cameraDirection);
   try {
-    await world.generateAsync(INITIAL_WORLD_RADIUS, (progress) => setLoadingProgress(progress * 0.75));
+    await world.generateAsync(DEFAULT_RENDER_DISTANCE, (progress) => setLoadingProgress(progress * 0.95));
     finalizeWorldLoad();
-    setLoadingProgress(0.85);
-    void world.generateAsync(EXTENDED_WORLD_RADIUS, (progress) => {
-      // scale progress to remaining 15%
-      const blended = 0.85 + progress * 0.15;
-      setLoadingProgress(blended);
-    });
     setLoadingProgress(1);
     hideLoadingOverlay();
     if (controls.isLocked) {

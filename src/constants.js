@@ -8,6 +8,9 @@ export const INITIAL_WORLD_RADIUS = 10;
 export const EXTENDED_WORLD_RADIUS = 20;
 export const ALWAYS_RENDER_RADIUS = 3; // chunk rings kept in every direction
 export const VIEW_CULL_ANGLE_DEG = 140; // total degrees of forward render cone
+export const DEFAULT_RENDER_DISTANCE = INITIAL_WORLD_RADIUS;
+export const CHUNK_UNLOAD_PADDING = 2;
+export const MAX_CHUNK_LOADS_PER_TICK = 2;
 
 export const BLOCK_TYPES = {
   air: 0,

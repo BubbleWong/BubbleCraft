@@ -7,6 +7,9 @@ import {
   BLOCK_TYPE_LABELS,
   BLOCK_COLORS,
   SEA_LEVEL,
+  DEFAULT_RENDER_DISTANCE,
+  CHUNK_UNLOAD_PADDING,
+  MAX_CHUNK_LOADS_PER_TICK,
   EXTENDED_WORLD_RADIUS,
   ALWAYS_RENDER_RADIUS,
   VIEW_CULL_ANGLE_DEG,
@@ -15,7 +18,8 @@ import {
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
-const isTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
+const isTransparentBlock = (blockType) =>
+  blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
 const isPassableBlock = (blockType) =>
   blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
 
@@ -38,6 +42,9 @@ const CHUNK_RECENCY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 4;
 
 const CHUNK_NEAR_PRIORITY_RADIUS = CHUNK_SIZE * 2;
 const CHUNK_NEAR_PRIORITY_BONUS = CHUNK_PRIORITY_BAND_WEIGHT * 8;
+const CHUNK_RING_PRIORITY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 200;
+const CHUNK_HINT_PRIORITY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 5;
+const CHUNK_MOVEMENT_RING_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 40;
 const ALWAYS_RENDER_RADIUS_CHUNKS = ALWAYS_RENDER_RADIUS;
 const VIEW_CULL_COS = Math.cos((VIEW_CULL_ANGLE_DEG * Math.PI) / 360);
 
@@ -345,6 +352,18 @@ function emitDetailedFace(
 
 const chunkKey = (cx, cz) => `${cx},${cz}`;
 
+const chunkCoordsFromPosition = (position) => {
+  if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) {
+    return { cx: 0, cz: 0 };
+  }
+  return {
+    cx: Math.floor(position.x / CHUNK_SIZE),
+    cz: Math.floor(position.z / CHUNK_SIZE),
+  };
+};
+
+const chebyshevDistanceChunks = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
+
 function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
   const tasks = [];
   const maxRadius = Math.max(0, Math.floor(Number.isFinite(radius) ? radius : 0));
@@ -480,6 +499,8 @@ class Chunk {
     this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
     this.geometryVersion = 0;
+    this.disposed = false;
+    this.pendingUnload = false;
   }
 
   index(x, y, z) {
@@ -666,6 +687,8 @@ class Chunk {
   }
 
   rebuild(options = {}) {
+    if (this.disposed) return;
+    this.pendingUnload = false;
     this.geometryVersion += 1;
     this.world.queueChunkRebuild(this, options);
   }
@@ -691,6 +714,18 @@ export class World {
     this.noise = new ImprovedNoise();
     this.seed = Math.floor(Math.random() * 2 ** 31);
     this.blockTotals = new Uint32Array(MAX_BLOCK_TYPE + 1);
+    this.renderDistanceChunks = DEFAULT_RENDER_DISTANCE;
+    this.unloadDistanceChunks = this.renderDistanceChunks + CHUNK_UNLOAD_PADDING;
+    this.maxStreamingLoadsPerFrame = Math.max(1, MAX_CHUNK_LOADS_PER_TICK);
+    this.pendingChunkLoads = [];
+    this.pendingChunkLoadSet = new Set();
+    this.chunkPriorityHints = new Map();
+    this.currentlyDesiredChunks = new Set();
+    this.playerChunk = { cx: 0, cz: 0 };
+    this.playerSpeed = 0;
+    this.lastSpeedSampleTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this.lastPlayerPositionSample = new THREE.Vector3(0, 0, 0);
+    this.visibilityRevision = 0;
     this.workerTaskId = 0;
     this.workerTasks = new Map();
     try {
@@ -733,10 +768,124 @@ export class World {
     return chunk;
   }
 
+  setRenderDistance(radiusChunks) {
+    const desired = Number.isFinite(radiusChunks) ? Math.floor(radiusChunks) : DEFAULT_RENDER_DISTANCE;
+    const clamped = Math.max(ALWAYS_RENDER_RADIUS_CHUNKS, desired);
+    if (clamped === this.renderDistanceChunks) return;
+    this.renderDistanceChunks = clamped;
+    this.unloadDistanceChunks = this.renderDistanceChunks + CHUNK_UNLOAD_PADDING;
+    this.refreshVisibility();
+  }
+
+  refreshVisibility({ reorderOnly = false } = {}) {
+    const radius = Math.max(0, Math.floor(this.renderDistanceChunks));
+    const tasks = chunkTasksInSpiral(radius, this.playerPosition, this.playerForward);
+    const desired = new Set();
+    const newHints = new Map();
+
+    for (let i = 0; i < tasks.length; i += 1) {
+      const { cx, cz } = tasks[i];
+      const key = chunkKey(cx, cz);
+      desired.add(key);
+      newHints.set(key, i);
+      if (!reorderOnly && !this.chunks.has(key) && !this.pendingChunkLoadSet.has(key)) {
+        this.pendingChunkLoadSet.add(key);
+        this.pendingChunkLoads.push({ cx, cz });
+      }
+    }
+
+    this.chunkPriorityHints = newHints;
+    this.currentlyDesiredChunks = desired;
+    if (!reorderOnly) {
+      this.visibilityRevision += 1;
+      this.prunePendingChunkLoads(desired);
+      this.cullChunksBeyondRadius(desired);
+    }
+  }
+
+  prunePendingChunkLoads(desiredSet) {
+    if (!desiredSet || this.pendingChunkLoads.length === 0) return;
+    const filtered = [];
+    for (const entry of this.pendingChunkLoads) {
+      const key = chunkKey(entry.cx, entry.cz);
+      if (desiredSet.has(key)) {
+        filtered.push(entry);
+      } else {
+        this.pendingChunkLoadSet.delete(key);
+      }
+    }
+    if (filtered.length !== this.pendingChunkLoads.length) {
+      this.pendingChunkLoads = filtered;
+    }
+  }
+
+  cullChunksBeyondRadius(desiredSet) {
+    const centerCx = this.playerChunk.cx;
+    const centerCz = this.playerChunk.cz;
+    const unloadRadius = Math.max(this.unloadDistanceChunks, ALWAYS_RENDER_RADIUS_CHUNKS);
+    for (const [key, chunk] of this.chunks.entries()) {
+      const keep = desiredSet.has(key);
+      const distance = chebyshevDistanceChunks(chunk.cx, chunk.cz, centerCx, centerCz);
+      if (!keep && distance > unloadRadius) {
+        this.unloadChunk(chunk);
+      }
+    }
+  }
+
+  pumpStreaming(maxLoads = this.maxStreamingLoadsPerFrame) {
+    const limit = Math.max(0, Math.floor(maxLoads ?? 0));
+    if (limit <= 0) return;
+    let loads = 0;
+    while (loads < limit && this.pendingChunkLoads.length > 0) {
+      const { cx, cz } = this.pendingChunkLoads.shift();
+      const key = chunkKey(cx, cz);
+      this.pendingChunkLoadSet.delete(key);
+      if (this.chunks.has(key)) continue;
+      this.ensureChunk(cx, cz);
+      loads += 1;
+    }
+    if (loads > 0) {
+      this.processRebuildQueue();
+    }
+  }
+
+  unloadChunk(chunk) {
+    if (!chunk || chunk.disposed) return;
+    const key = chunkKey(chunk.cx, chunk.cz);
+    this.chunks.delete(key);
+    this.chunkPriorityHints.delete(key);
+    this.currentlyDesiredChunks.delete(key);
+    chunk.disposed = true;
+    chunk.pendingUnload = true;
+    this.applyChunkCounts(chunk, -1);
+
+    const pending = this.pendingRebuilds.get(chunk);
+    if (pending) {
+      this.pendingRebuilds.delete(chunk);
+    }
+
+    if (chunk.mesh) {
+      this.scene.remove(chunk.mesh);
+      this.chunkMeshes.delete(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+      chunk.mesh = null;
+    }
+
+    for (const [id, task] of this.workerTasks.entries()) {
+      if (task.chunk === chunk) {
+        task.cancelled = true;
+      }
+    }
+  }
+
   queueChunkRebuild(chunk, options = {}) {
-    if (!chunk) return;
+    if (!chunk || chunk.disposed) return;
     const { urgent = false } = options;
     const version = chunk.geometryVersion;
+    if (urgent) {
+      const key = chunkKey(chunk.cx, chunk.cz);
+      this.chunkPriorityHints.set(key, -1);
+    }
     const existing = this.pendingRebuilds.get(chunk);
     const order = (this.rebuildRequestSerial += 1);
     if (existing) {
@@ -756,10 +905,37 @@ export class World {
 
   updatePlayerPosition(position, viewDirection = null) {
     if (!position) return;
-    this.playerPosition.copy(position);
-    if (viewDirection) {
-      this.applyViewDirection(viewDirection);
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const deltaSeconds = (now - this.lastSpeedSampleTime) / 1000;
+    if (Number.isFinite(deltaSeconds) && deltaSeconds > 1e-4) {
+      const dx = position.x - this.lastPlayerPositionSample.x;
+      const dz = position.z - this.lastPlayerPositionSample.z;
+      const speed = Math.sqrt(dx * dx + dz * dz) / deltaSeconds;
+      this.playerSpeed = Number.isFinite(speed) ? Math.min(speed, CHUNK_SIZE * 8) : this.playerSpeed;
     }
+    this.lastPlayerPositionSample.copy(position);
+    this.lastSpeedSampleTime = now;
+
+    this.playerPosition.copy(position);
+    const coords = chunkCoordsFromPosition(position);
+    const chunkChanged = coords.cx !== this.playerChunk.cx || coords.cz !== this.playerChunk.cz;
+    if (chunkChanged) {
+      this.playerChunk.cx = coords.cx;
+      this.playerChunk.cz = coords.cz;
+    }
+
+    let viewChanged = false;
+    if (viewDirection) {
+      viewChanged = this.applyViewDirection(viewDirection);
+    }
+
+    if (chunkChanged) {
+      this.refreshVisibility();
+    } else if (viewChanged) {
+      this.refreshVisibility({ reorderOnly: true });
+    }
+
+    this.pumpStreaming();
     this.processRebuildQueue();
   }
 
@@ -767,6 +943,8 @@ export class World {
     if (!viewDirection) return;
     const changed = this.applyViewDirection(viewDirection);
     if (changed) {
+      this.refreshVisibility({ reorderOnly: true });
+      this.pumpStreaming();
       this.processRebuildQueue();
     }
   }
@@ -804,7 +982,10 @@ export class World {
     let bestPriority = Infinity;
     for (const entry of this.pendingRebuilds.values()) {
       const { chunk } = entry;
-      if (!chunk || chunk.rebuildInFlight) continue;
+      if (!chunk || chunk.rebuildInFlight || chunk.disposed || chunk.pendingUnload) {
+        if (chunk) this.pendingRebuilds.delete(chunk);
+        continue;
+      }
       const entryOrder = entry.order ?? 0;
       let priority = this.computeChunkPriority(chunk);
       if (entry.urgent) {
@@ -830,6 +1011,10 @@ export class World {
   }
 
   computeChunkPriority(chunk) {
+    if (!chunk) return Infinity;
+    const key = chunkKey(chunk.cx, chunk.cz);
+    const hint = this.chunkPriorityHints.has(key) ? this.chunkPriorityHints.get(key) : Number.POSITIVE_INFINITY;
+    const ring = chebyshevDistanceChunks(chunk.cx, chunk.cz, this.playerChunk.cx, this.playerChunk.cz);
     const centerX = chunk.origin.x + CHUNK_SIZE * 0.5;
     const centerZ = chunk.origin.z + CHUNK_SIZE * 0.5;
     const dx = centerX - this.playerPosition.x;
@@ -838,8 +1023,20 @@ export class World {
     const distance = Math.sqrt(distanceSquared);
     let priority = distanceSquared;
 
+    priority += ring * CHUNK_RING_PRIORITY_WEIGHT;
+
+    if (Number.isFinite(hint)) {
+      priority += hint * CHUNK_HINT_PRIORITY_WEIGHT;
+    } else {
+      priority += CHUNK_RING_PRIORITY_WEIGHT * 4;
+    }
+
     if (distance <= CHUNK_NEAR_PRIORITY_RADIUS) {
       priority -= CHUNK_NEAR_PRIORITY_BONUS;
+    }
+
+    if (ring <= ALWAYS_RENDER_RADIUS_CHUNKS) {
+      priority -= CHUNK_NEAR_PRIORITY_BONUS * 0.5;
     }
 
     if (distance > 1e-6) {
@@ -847,6 +1044,10 @@ export class World {
       if (bandIndex > 0) {
         priority += bandIndex * CHUNK_PRIORITY_BAND_WEIGHT;
       }
+    }
+
+    if (this.playerSpeed > 0.5) {
+      priority += ring * this.playerSpeed * CHUNK_MOVEMENT_RING_WEIGHT;
     }
 
     return priority;
@@ -898,23 +1099,43 @@ export class World {
 
   rebuildChunkIfExists(cx, cz, options = {}) {
     const chunk = this.getChunk(cx, cz);
-    if (chunk) chunk.rebuild(options);
+    if (chunk && !chunk.disposed) chunk.rebuild(options);
   }
 
-  generate(radius = EXTENDED_WORLD_RADIUS) {
-    for (const { cx, cz } of chunkTasksInSpiral(radius, this.playerPosition, this.playerForward)) {
+  generate(radius = this.renderDistanceChunks) {
+    const desiredRadius = Math.max(ALWAYS_RENDER_RADIUS_CHUNKS, Math.floor(Number.isFinite(radius) ? radius : this.renderDistanceChunks));
+    this.renderDistanceChunks = desiredRadius;
+    this.unloadDistanceChunks = this.renderDistanceChunks + CHUNK_UNLOAD_PADDING;
+    const coords = chunkCoordsFromPosition(this.playerPosition);
+    this.playerChunk.cx = coords.cx;
+    this.playerChunk.cz = coords.cz;
+    this.pendingChunkLoads.length = 0;
+    this.pendingChunkLoadSet.clear();
+
+    for (const { cx, cz } of chunkTasksInSpiral(desiredRadius, this.playerPosition, this.playerForward)) {
       this.ensureChunk(cx, cz);
     }
+
+    this.refreshVisibility();
   }
 
-  async generateAsync(radius = EXTENDED_WORLD_RADIUS, onProgress = null) {
-    const tasks = chunkTasksInSpiral(radius, this.playerPosition, this.playerForward);
+  async generateAsync(radius = this.renderDistanceChunks, onProgress = null) {
+    const desiredRadius = Math.max(ALWAYS_RENDER_RADIUS_CHUNKS, Math.floor(Number.isFinite(radius) ? radius : this.renderDistanceChunks));
+    this.renderDistanceChunks = desiredRadius;
+    this.unloadDistanceChunks = this.renderDistanceChunks + CHUNK_UNLOAD_PADDING;
+    const coords = chunkCoordsFromPosition(this.playerPosition);
+    this.playerChunk.cx = coords.cx;
+    this.playerChunk.cz = coords.cz;
+    const tasks = chunkTasksInSpiral(desiredRadius, this.playerPosition, this.playerForward);
 
     const total = tasks.length;
     if (total === 0) {
       if (typeof onProgress === 'function') onProgress(1);
       return;
     }
+
+    this.pendingChunkLoads.length = 0;
+    this.pendingChunkLoadSet.clear();
 
     for (let index = 0; index < total; index += 1) {
       const { cx, cz } = tasks[index];
@@ -928,6 +1149,8 @@ export class World {
         await new Promise((resolve) => requestAnimationFrame(resolve));
       }
     }
+
+    this.refreshVisibility();
   }
 
   requestChunkGeometry(chunk, version) {
@@ -973,6 +1196,7 @@ export class World {
     if (!task) return;
     this.workerTasks.delete(id);
     const { chunk } = task;
+    if (!chunk) return;
     if (version !== chunk.geometryVersion) {
       this.finishChunkRebuild(chunk);
       return;
@@ -984,6 +1208,17 @@ export class World {
     }
 
     const previousMesh = chunk.mesh;
+
+    if (task.cancelled || chunk.disposed || chunk.pendingUnload) {
+      if (previousMesh) {
+        this.scene.remove(previousMesh);
+        this.chunkMeshes.delete(previousMesh);
+        previousMesh.geometry.dispose();
+        chunk.mesh = null;
+      }
+      this.finishChunkRebuild(chunk);
+      return;
+    }
 
     if (!positions || positions.length === 0) {
       if (previousMesh) {

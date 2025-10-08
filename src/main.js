@@ -572,7 +572,7 @@ function attemptPlaceBlock(forceType = null) {
   const distance = Math.hypot(target.x + 0.5 - playerPos.x, target.y + 0.5 - playerPos.y, target.z + 0.5 - playerPos.z);
   if (distance <= 1.75) return false;
   const existing = world.getBlock(target.x, target.y, target.z);
-  if (existing !== BLOCK_TYPES.air) return false;
+  if (!NON_COLLIDING_BLOCKS.has(existing)) return false;
   const placed = world.setBlock(target.x, target.y, target.z, blockType);
   if (!placed) return false;
   if (!forceType) inventory.removeFromSlot(activeHotbarIndex, 1);

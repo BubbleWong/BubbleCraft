@@ -559,7 +559,7 @@ class Chunk {
       for (let dx = -radius; dx <= radius; dx += 1) {
         for (let dz = -radius; dz <= radius; dz += 1) {
           const check = this.get(lx + dx, y, lz + dz);
-          if (check !== BLOCK_TYPES.air) return false;
+        if (!isPassableBlock(check)) return false;
         }
       }
     }
@@ -591,7 +591,7 @@ class Chunk {
             continue;
           }
           if (dx === 0 && dz === 0 && targetY <= groundY + height) continue;
-          if (this.get(targetX, targetY, targetZ) === BLOCK_TYPES.air) {
+          if (isPassableBlock(this.get(targetX, targetY, targetZ))) {
             const leafNoise = this.world.random3D(worldX + dx, targetY, worldZ + dz, 113);
             if (leafNoise > 0.2) {
               this.set(targetX, targetY, targetZ, BLOCK_TYPES.leaves);
@@ -620,7 +620,7 @@ class Chunk {
       ) {
         continue;
       }
-      if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && this.get(fx, flowerY, fz) === BLOCK_TYPES.air) {
+      if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && isPassableBlock(this.get(fx, flowerY, fz))) {
         const chance = this.world.random2D(worldX + dx * 3, worldZ + dz * 3, 127);
         if (chance > 0.65) {
           this.set(fx, flowerY, fz, BLOCK_TYPES.flower);

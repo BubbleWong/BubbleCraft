@@ -7,6 +7,8 @@ import {
   BLOCK_TYPE_LABELS,
   BLOCK_COLORS,
   EXTENDED_WORLD_RADIUS,
+  ALWAYS_RENDER_RADIUS,
+  VIEW_CULL_ANGLE_DEG,
 } from './constants.js';
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -34,6 +36,8 @@ const CHUNK_RECENCY_WEIGHT = CHUNK_PRIORITY_BAND_WEIGHT * 4;
 
 const CHUNK_NEAR_PRIORITY_RADIUS = CHUNK_SIZE * 2;
 const CHUNK_NEAR_PRIORITY_BONUS = CHUNK_PRIORITY_BAND_WEIGHT * 8;
+const ALWAYS_RENDER_RADIUS_CHUNKS = ALWAYS_RENDER_RADIUS;
+const VIEW_CULL_COS = Math.cos((VIEW_CULL_ANGLE_DEG * Math.PI) / 360);
 
 const TOP_FACE_INDEX = 2;
 const BOTTOM_FACE_INDEX = 3;
@@ -362,6 +366,7 @@ function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
   ];
 
   let startDirection = 0;
+  let forwardDir = null;
   if (forward) {
     const fxRaw = forward.x ?? 0;
     const fzRaw = forward.z ?? 0;
@@ -370,6 +375,7 @@ function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
       const magnitude = Math.sqrt(magnitudeSq);
       const fx = fxRaw / magnitude;
       const fz = fzRaw / magnitude;
+      forwardDir = { x: fx, z: fz };
       let bestDot = -Infinity;
       for (let i = 0; i < directionVectors.length; i += 1) {
         const dir = directionVectors[i];
@@ -398,6 +404,24 @@ function chunkTasksInSpiral(radius, playerPosition = null, forward = null) {
     const cz = baseChunkZ + offsetZ;
     const key = chunkKey(cx, cz);
     if (visited.has(key)) return;
+
+    const chebyshevDistance = Math.max(Math.abs(offsetX), Math.abs(offsetZ));
+    const alwaysKeep = chebyshevDistance <= ALWAYS_RENDER_RADIUS_CHUNKS;
+    if (!alwaysKeep && forwardDir) {
+      const centerX = cx * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+      const centerZ = cz * CHUNK_SIZE + CHUNK_SIZE * 0.5;
+      const dirX = centerX - playerWorldX;
+      const dirZ = centerZ - playerWorldZ;
+      const lenSq = dirX * dirX + dirZ * dirZ;
+      if (lenSq > 1e-6) {
+        const invLen = 1 / Math.sqrt(lenSq);
+        const normX = dirX * invLen;
+        const normZ = dirZ * invLen;
+        const dotForward = normX * forwardDir.x + normZ * forwardDir.z;
+        if (dotForward < VIEW_CULL_COS) return;
+      }
+    }
+
     visited.add(key);
     tasks.push({ cx, cz });
   };

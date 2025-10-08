@@ -6,6 +6,8 @@ export const CHUNK_HEIGHT = 64;
 // expand the explorable area significantly.
 export const INITIAL_WORLD_RADIUS = 10;
 export const EXTENDED_WORLD_RADIUS = 20;
+export const ALWAYS_RENDER_RADIUS = 3; // chunk rings kept in every direction
+export const VIEW_CULL_ANGLE_DEG = 140; // total degrees of forward render cone
 
 export const BLOCK_TYPES = {
   air: 0,

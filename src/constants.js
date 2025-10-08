@@ -1,6 +1,12 @@
 export const CHUNK_SIZE = 16;
 export const CHUNK_HEIGHT = 64;
 
+// Generation radii control how many chunk rings are created around the player.
+// The original configuration used radii of 1 and 2; increase them by 10× to
+// expand the explorable area significantly.
+export const INITIAL_WORLD_RADIUS = 10;
+export const EXTENDED_WORLD_RADIUS = 20;
+
 export const BLOCK_TYPES = {
   air: 0,
   grass: 1,

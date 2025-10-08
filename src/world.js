@@ -6,6 +6,7 @@ import {
   BLOCK_TYPES,
   BLOCK_TYPE_LABELS,
   BLOCK_COLORS,
+  EXTENDED_WORLD_RADIUS,
 } from './constants.js';
 
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -866,13 +867,13 @@ export class World {
     if (chunk) chunk.rebuild(options);
   }
 
-  generate(radius = 2) {
+  generate(radius = EXTENDED_WORLD_RADIUS) {
     for (const { cx, cz } of chunkTasksInSpiral(radius, this.playerPosition, this.playerForward)) {
       this.ensureChunk(cx, cz);
     }
   }
 
-  async generateAsync(radius = 2, onProgress = null) {
+  async generateAsync(radius = EXTENDED_WORLD_RADIUS, onProgress = null) {
     const tasks = chunkTasksInSpiral(radius, this.playerPosition, this.playerForward);
 
     const total = tasks.length;

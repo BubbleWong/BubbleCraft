@@ -501,6 +501,8 @@ class Chunk {
     this.geometryVersion = 0;
     this.disposed = false;
     this.pendingUnload = false;
+    this.urgentRebuildInFlight = false;
+    this.pendingUrgentVersion = null;
   }
 
   index(x, y, z) {
@@ -738,6 +740,18 @@ export class World {
       console.error('Failed to initialize chunk geometry worker', error);
       this.worker = null;
     }
+    this.urgentWorkerTaskId = 0;
+    this.urgentWorkerTasks = new Map();
+    try {
+      this.urgentWorker = new Worker(new URL('./worker/chunkGeometryWorker.js', import.meta.url), { type: 'module' });
+      this.urgentWorker.addEventListener('message', (event) => this.handleUrgentWorkerMessage(event));
+      this.urgentWorker.addEventListener('error', (event) => {
+        console.error('Urgent chunk geometry worker error', event);
+      });
+    } catch (error) {
+      console.error('Failed to initialize urgent chunk geometry worker', error);
+      this.urgentWorker = null;
+    }
   }
 
   pseudoRandom(x, y, z, salt = 0) {
@@ -857,6 +871,8 @@ export class World {
     this.currentlyDesiredChunks.delete(key);
     chunk.disposed = true;
     chunk.pendingUnload = true;
+    chunk.urgentRebuildInFlight = false;
+    chunk.pendingUrgentVersion = null;
     this.applyChunkCounts(chunk, -1);
 
     const pending = this.pendingRebuilds.get(chunk);
@@ -876,6 +892,11 @@ export class World {
         task.cancelled = true;
       }
     }
+    for (const [id, task] of this.urgentWorkerTasks.entries()) {
+      if (task.chunk === chunk) {
+        task.cancelled = true;
+      }
+    }
   }
 
   queueChunkRebuild(chunk, options = {}) {
@@ -883,8 +904,19 @@ export class World {
     const { urgent = false } = options;
     const version = chunk.geometryVersion;
     if (urgent) {
+      if (this.urgentWorker) {
+        this.pendingRebuilds.delete(chunk);
+        if (chunk.urgentRebuildInFlight) {
+          chunk.pendingUrgentVersion = version;
+        } else {
+          this.requestUrgentChunkGeometry(chunk, version);
+        }
+        return;
+      }
       const key = chunkKey(chunk.cx, chunk.cz);
       this.chunkPriorityHints.set(key, -1);
+      chunk.pendingUrgentVersion = null;
+      chunk.urgentRebuildInFlight = false;
     }
     const existing = this.pendingRebuilds.get(chunk);
     const order = (this.rebuildRequestSerial += 1);
@@ -1153,8 +1185,8 @@ export class World {
     this.refreshVisibility();
   }
 
-  requestChunkGeometry(chunk, version) {
-    if (!this.worker) return;
+  createChunkGeometryPayload(chunk) {
+    if (!chunk) return null;
     const blocksCopy = chunk.blocks.slice();
     const neighbors = {};
     const transfers = [blocksCopy.buffer];
@@ -1173,71 +1205,69 @@ export class World {
       }
     }
 
+    return {
+      payload: {
+        seed: this.seed,
+        origin: [chunk.origin.x, chunk.origin.y, chunk.origin.z],
+        blocks: blocksCopy.buffer,
+        neighbors,
+      },
+      transfers,
+    };
+  }
+
+  requestChunkGeometry(chunk, version) {
+    if (!this.worker) return;
+    const data = this.createChunkGeometryPayload(chunk);
+    if (!data) return;
+    const { payload, transfers } = data;
+
     const id = ++this.workerTaskId;
     this.workerTasks.set(id, { chunk, version });
     this.worker.postMessage(
       {
         id,
         version,
-        payload: {
-          seed: this.seed,
-          origin: [chunk.origin.x, chunk.origin.y, chunk.origin.z],
-          blocks: blocksCopy.buffer,
-          neighbors,
-        },
+        payload,
       },
       transfers,
     );
   }
 
-  handleWorkerMessage(event) {
-    const { id, version, positions, normals, colors, error } = event.data;
-    const task = this.workerTasks.get(id);
-    if (!task) return;
-    this.workerTasks.delete(id);
-    const { chunk } = task;
-    if (!chunk) return;
-    if (version !== chunk.geometryVersion) {
-      this.finishChunkRebuild(chunk);
-      return;
-    }
-    if (error) {
-      console.error('Chunk geometry worker message error:', error);
-      this.finishChunkRebuild(chunk);
-      return;
-    }
-
+  applyChunkGeometry(chunk, version, geometry) {
+    if (!chunk || chunk.disposed || chunk.pendingUnload) return;
+    if (version !== chunk.geometryVersion) return;
     const previousMesh = chunk.mesh;
 
-    if (task.cancelled || chunk.disposed || chunk.pendingUnload) {
-      if (previousMesh) {
-        this.scene.remove(previousMesh);
-        this.chunkMeshes.delete(previousMesh);
-        previousMesh.geometry.dispose();
-        chunk.mesh = null;
-      }
-      this.finishChunkRebuild(chunk);
-      return;
-    }
+    const positionsInput = geometry?.positions;
+    const normalsInput = geometry?.normals;
+    const colorsInput = geometry?.colors;
 
-    if (!positions || positions.length === 0) {
+    if (!positionsInput || positionsInput.length === 0) {
       if (previousMesh) {
         this.scene.remove(previousMesh);
         this.chunkMeshes.delete(previousMesh);
         previousMesh.geometry.dispose();
       }
       chunk.mesh = null;
-      this.finishChunkRebuild(chunk);
       return;
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.computeBoundingSphere();
+    const positions = positionsInput instanceof Float32Array ? positionsInput : new Float32Array(positionsInput);
+    const normals = normalsInput instanceof Float32Array ? normalsInput : new Float32Array(normalsInput ?? []);
+    const colors = colorsInput instanceof Float32Array ? colorsInput : new Float32Array(colorsInput ?? []);
 
-    const mesh = new THREE.Mesh(geometry, this.material);
+    const bufferGeometry = new THREE.BufferGeometry();
+    bufferGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    if (normals.length > 0) {
+      bufferGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    }
+    if (colors.length > 0) {
+      bufferGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    }
+    bufferGeometry.computeBoundingSphere();
+
+    const mesh = new THREE.Mesh(bufferGeometry, this.material);
     mesh.position.copy(chunk.origin);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
@@ -1252,7 +1282,85 @@ export class World {
     chunk.mesh = mesh;
     this.scene.add(mesh);
     this.chunkMeshes.add(mesh);
+  }
+
+  handleWorkerMessage(event) {
+    const { id, version, positions, normals, colors, error } = event.data;
+    const task = this.workerTasks.get(id);
+    if (!task) return;
+    this.workerTasks.delete(id);
+    const { chunk } = task;
+    if (!chunk) return;
+    if (error) {
+      console.error('Chunk geometry worker message error:', error);
+      this.finishChunkRebuild(chunk);
+      return;
+    }
+
+    if (task.cancelled || chunk.disposed || chunk.pendingUnload) {
+      if (chunk.mesh) {
+        this.scene.remove(chunk.mesh);
+        this.chunkMeshes.delete(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        chunk.mesh = null;
+      }
+      this.finishChunkRebuild(chunk);
+      return;
+    }
+
+    this.applyChunkGeometry(chunk, version, { positions, normals, colors });
     this.finishChunkRebuild(chunk);
+  }
+
+  requestUrgentChunkGeometry(chunk, version) {
+    if (!this.urgentWorker || !chunk) return;
+    const data = this.createChunkGeometryPayload(chunk);
+    if (!data) return;
+    const { payload, transfers } = data;
+
+    const id = ++this.urgentWorkerTaskId;
+    this.urgentWorkerTasks.set(id, { chunk, version });
+    chunk.urgentRebuildInFlight = true;
+    chunk.pendingUrgentVersion = null;
+    this.urgentWorker.postMessage(
+      {
+        id,
+        version,
+        payload,
+      },
+      transfers,
+    );
+  }
+
+  handleUrgentWorkerMessage(event) {
+    const { id, version, positions, normals, colors, error } = event.data;
+    const task = this.urgentWorkerTasks.get(id);
+    if (!task) return;
+    this.urgentWorkerTasks.delete(id);
+    const { chunk } = task;
+    if (!chunk) return;
+
+    chunk.urgentRebuildInFlight = false;
+    const pendingVersion = chunk.pendingUrgentVersion;
+    chunk.pendingUrgentVersion = null;
+
+    if (task.cancelled || chunk.disposed || chunk.pendingUnload) {
+      this.processRebuildQueue();
+      return;
+    }
+
+    if (error) {
+      console.error('Urgent chunk geometry worker message error:', error);
+    } else {
+      this.applyChunkGeometry(chunk, version, { positions, normals, colors });
+    }
+
+    if (Number.isFinite(pendingVersion) && pendingVersion === chunk.geometryVersion && !chunk.disposed && !chunk.pendingUnload) {
+      this.requestUrgentChunkGeometry(chunk, pendingVersion);
+      return;
+    }
+
+    this.processRebuildQueue();
   }
 
   applyChunkCounts(chunk, delta) {

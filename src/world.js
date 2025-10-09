@@ -495,6 +495,7 @@ class Chunk {
     this.origin = new THREE.Vector3(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.mesh = null;
+    this.waterMesh = null;
     this.rebuildInFlight = false;
     this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
@@ -713,6 +714,14 @@ export class World {
     this.playerForward = new THREE.Vector3(0, 0, -1);
     this.playerForwardScratch = new THREE.Vector3();
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.waterMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+    });
+    this.waterMaterial.color = new THREE.Color(0.85, 0.95, 1);
+    this.waterMaterial.side = THREE.DoubleSide;
     this.noise = new ImprovedNoise();
     this.seed = Math.floor(Math.random() * 2 ** 31);
     this.blockTotals = new Uint32Array(MAX_BLOCK_TYPE + 1);
@@ -885,6 +894,13 @@ export class World {
       this.chunkMeshes.delete(chunk.mesh);
       chunk.mesh.geometry.dispose();
       chunk.mesh = null;
+    }
+
+    if (chunk.waterMesh) {
+      this.scene.remove(chunk.waterMesh);
+      this.chunkMeshes.delete(chunk.waterMesh);
+      chunk.waterMesh.geometry.dispose();
+      chunk.waterMesh = null;
     }
 
     for (const [id, task] of this.workerTasks.entries()) {
@@ -1238,54 +1254,91 @@ export class World {
     if (!chunk || chunk.disposed || chunk.pendingUnload) return;
     if (version !== chunk.geometryVersion) return;
     const previousMesh = chunk.mesh;
+    const previousWaterMesh = chunk.waterMesh;
 
-    const positionsInput = geometry?.positions;
-    const normalsInput = geometry?.normals;
-    const colorsInput = geometry?.colors;
+    const solidData = geometry?.solid ?? {};
+    const waterData = geometry?.water ?? {};
 
-    if (!positionsInput || positionsInput.length === 0) {
-      if (previousMesh) {
-        this.scene.remove(previousMesh);
-        this.chunkMeshes.delete(previousMesh);
-        previousMesh.geometry.dispose();
+    const toFloat32 = (input) => {
+      if (input instanceof Float32Array) return input;
+      if (!input) return new Float32Array(0);
+      return new Float32Array(input);
+    };
+
+    const buildMesh = (positions, normals, colors, material, { receiveShadow = true, renderOrder = 0 } = {}) => {
+      if (!positions || positions.length === 0) return null;
+      const geometryBuffer = new THREE.BufferGeometry();
+      geometryBuffer.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      if (normals && normals.length > 0) {
+        geometryBuffer.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
       }
-      chunk.mesh = null;
-      return;
-    }
+      if (colors && colors.length > 0) {
+        geometryBuffer.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      }
+      geometryBuffer.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geometryBuffer, material);
+      mesh.position.copy(chunk.origin);
+      mesh.castShadow = false;
+      mesh.receiveShadow = receiveShadow;
+      mesh.renderOrder = renderOrder;
+      mesh.userData.chunk = chunk;
+      return mesh;
+    };
 
-    const positions = positionsInput instanceof Float32Array ? positionsInput : new Float32Array(positionsInput);
-    const normals = normalsInput instanceof Float32Array ? normalsInput : new Float32Array(normalsInput ?? []);
-    const colors = colorsInput instanceof Float32Array ? colorsInput : new Float32Array(colorsInput ?? []);
+    const solidPositions = toFloat32(solidData.positions);
+    const solidNormals = toFloat32(solidData.normals);
+    const solidColors = toFloat32(solidData.colors);
 
-    const bufferGeometry = new THREE.BufferGeometry();
-    bufferGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    if (normals.length > 0) {
-      bufferGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    }
-    if (colors.length > 0) {
-      bufferGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    }
-    bufferGeometry.computeBoundingSphere();
-
-    const mesh = new THREE.Mesh(bufferGeometry, this.material);
-    mesh.position.copy(chunk.origin);
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    mesh.userData.chunk = chunk;
+    const waterPositions = toFloat32(waterData.positions);
+    const waterNormals = toFloat32(waterData.normals);
+    const waterColors = toFloat32(waterData.colors);
 
     if (previousMesh) {
       this.scene.remove(previousMesh);
       this.chunkMeshes.delete(previousMesh);
       previousMesh.geometry.dispose();
+      chunk.mesh = null;
     }
 
-    chunk.mesh = mesh;
-    this.scene.add(mesh);
-    this.chunkMeshes.add(mesh);
+    if (previousWaterMesh) {
+      this.scene.remove(previousWaterMesh);
+      this.chunkMeshes.delete(previousWaterMesh);
+      previousWaterMesh.geometry.dispose();
+      chunk.waterMesh = null;
+    }
+
+    const solidMesh = buildMesh(solidPositions, solidNormals, solidColors, this.material, { receiveShadow: true, renderOrder: 0 });
+    const waterMesh = buildMesh(waterPositions, waterNormals, waterColors, this.waterMaterial, { receiveShadow: false, renderOrder: 1 });
+
+    if (solidMesh) {
+      this.scene.add(solidMesh);
+      this.chunkMeshes.add(solidMesh);
+      chunk.mesh = solidMesh;
+    } else {
+      chunk.mesh = null;
+    }
+
+    if (waterMesh) {
+      this.scene.add(waterMesh);
+      this.chunkMeshes.add(waterMesh);
+      chunk.waterMesh = waterMesh;
+    } else {
+      chunk.waterMesh = null;
+    }
   }
 
   handleWorkerMessage(event) {
-    const { id, version, positions, normals, colors, error } = event.data;
+    const {
+      id,
+      version,
+      solidPositions,
+      solidNormals,
+      solidColors,
+      waterPositions,
+      waterNormals,
+      waterColors,
+      error,
+    } = event.data;
     const task = this.workerTasks.get(id);
     if (!task) return;
     this.workerTasks.delete(id);
@@ -1304,11 +1357,20 @@ export class World {
         chunk.mesh.geometry.dispose();
         chunk.mesh = null;
       }
+      if (chunk.waterMesh) {
+        this.scene.remove(chunk.waterMesh);
+        this.chunkMeshes.delete(chunk.waterMesh);
+        chunk.waterMesh.geometry.dispose();
+        chunk.waterMesh = null;
+      }
       this.finishChunkRebuild(chunk);
       return;
     }
 
-    this.applyChunkGeometry(chunk, version, { positions, normals, colors });
+    this.applyChunkGeometry(chunk, version, {
+      solid: { positions: solidPositions, normals: solidNormals, colors: solidColors },
+      water: { positions: waterPositions, normals: waterNormals, colors: waterColors },
+    });
     this.finishChunkRebuild(chunk);
   }
 
@@ -1333,7 +1395,17 @@ export class World {
   }
 
   handleUrgentWorkerMessage(event) {
-    const { id, version, positions, normals, colors, error } = event.data;
+    const {
+      id,
+      version,
+      solidPositions,
+      solidNormals,
+      solidColors,
+      waterPositions,
+      waterNormals,
+      waterColors,
+      error,
+    } = event.data;
     const task = this.urgentWorkerTasks.get(id);
     if (!task) return;
     this.urgentWorkerTasks.delete(id);
@@ -1345,6 +1417,18 @@ export class World {
     chunk.pendingUrgentVersion = null;
 
     if (task.cancelled || chunk.disposed || chunk.pendingUnload) {
+      if (chunk.mesh) {
+        this.scene.remove(chunk.mesh);
+        this.chunkMeshes.delete(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        chunk.mesh = null;
+      }
+      if (chunk.waterMesh) {
+        this.scene.remove(chunk.waterMesh);
+        this.chunkMeshes.delete(chunk.waterMesh);
+        chunk.waterMesh.geometry.dispose();
+        chunk.waterMesh = null;
+      }
       this.processRebuildQueue();
       return;
     }
@@ -1352,7 +1436,10 @@ export class World {
     if (error) {
       console.error('Urgent chunk geometry worker message error:', error);
     } else {
-      this.applyChunkGeometry(chunk, version, { positions, normals, colors });
+      this.applyChunkGeometry(chunk, version, {
+        solid: { positions: solidPositions, normals: solidNormals, colors: solidColors },
+        water: { positions: waterPositions, normals: waterNormals, colors: waterColors },
+      });
     }
 
     if (Number.isFinite(pendingVersion) && pendingVersion === chunk.geometryVersion && !chunk.disposed && !chunk.pendingUnload) {

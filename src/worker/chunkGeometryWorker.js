@@ -12,6 +12,7 @@ import {
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const isFullyTransparentBlock = (blockType) => blockType === BLOCK_TYPES.flower;
 const isTranslucentBlock = (blockType) => blockType === BLOCK_TYPES.water;
+const WATER_GLASS_TINT = [0.78, 0.9, 1.0];
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.8, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] }, // +X
@@ -220,6 +221,7 @@ function applyTextureDetail(blockType, baseColor, faceIndex, corner, worldX, wor
         const sideGradient = clamp01(0.5 + depth * 0.35 + (pixelNoise(603) - 0.5) * 0.15);
         water = mixColor(water, deepTint, sideGradient);
       }
+      water = mixColor(water, WATER_GLASS_TINT, 0.25);
       return water.map((c, idx) => clamp01(c + (pixelNoise(604 + idx) - 0.5) * 0.05));
     }
     case BLOCK_TYPES.wood: {
@@ -838,9 +840,8 @@ function buildChunkGeometry(payload) {
     }
   }
 
-  const positions = [];
-  const normals = [];
-  const colors = [];
+  const solid = { positions: [], normals: [], colors: [] };
+  const water = { positions: [], normals: [], colors: [] };
   const random = createRandom(seed);
 
   for (let lx = 0; lx < CHUNK_SIZE; lx += 1) {
@@ -855,9 +856,9 @@ function buildChunkGeometry(payload) {
 
         if (blockType === BLOCK_TYPES.flower) {
           addFlowerGeometry(
-            positions,
-            normals,
-            colors,
+            solid.positions,
+            solid.normals,
+            solid.colors,
             lx,
             y,
             lz,
@@ -872,6 +873,8 @@ function buildChunkGeometry(payload) {
         const baseColor = BLOCK_COLORS[blockType];
         if (!baseColor) continue;
 
+        const destination = blockType === BLOCK_TYPES.water ? water : solid;
+
         for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
           const face = FACE_DEFS[faceIndex];
           const neighborType = getBlockAt(lx + face.dir[0], y + face.dir[1], lz + face.dir[2], blocks, neighbors);
@@ -882,9 +885,9 @@ function buildChunkGeometry(payload) {
           if (!neighborTransparent) continue;
 
           emitDetailedFace(
-            positions,
-            normals,
-            colors,
+            destination.positions,
+            destination.normals,
+            destination.colors,
             blockType,
             baseColor,
             faceIndex,
@@ -903,9 +906,16 @@ function buildChunkGeometry(payload) {
   }
 
   return {
-    positions: new Float32Array(positions),
-    normals: new Float32Array(normals),
-    colors: new Float32Array(colors),
+    solid: {
+      positions: new Float32Array(solid.positions),
+      normals: new Float32Array(solid.normals),
+      colors: new Float32Array(solid.colors),
+    },
+    water: {
+      positions: new Float32Array(water.positions),
+      normals: new Float32Array(water.normals),
+      colors: new Float32Array(water.colors),
+    },
   };
 }
 
@@ -914,15 +924,26 @@ self.addEventListener('message', (event) => {
   if (!payload) return;
   try {
     const result = buildChunkGeometry(payload);
+    const { solid, water } = result;
     self.postMessage(
       {
         id,
         version,
-        positions: result.positions,
-        normals: result.normals,
-        colors: result.colors,
+        solidPositions: solid.positions,
+        solidNormals: solid.normals,
+        solidColors: solid.colors,
+        waterPositions: water.positions,
+        waterNormals: water.normals,
+        waterColors: water.colors,
       },
-      [result.positions.buffer, result.normals.buffer, result.colors.buffer],
+      [
+        solid.positions.buffer,
+        solid.normals.buffer,
+        solid.colors.buffer,
+        water.positions.buffer,
+        water.normals.buffer,
+        water.colors.buffer,
+      ],
     );
   } catch (error) {
     self.postMessage({ id, version, error: error?.message ?? String(error) });

@@ -552,7 +552,7 @@ function attemptBreakBlock() {
   const target = world.getRaycastTarget(raycaster, { place: false });
   if (!target) return false;
   const blockType = world.getBlock(target.x, target.y, target.z);
-  if (blockType === BLOCK_TYPES.air) return false;
+  if (blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.water) return false;
   const removed = world.setBlock(target.x, target.y, target.z, BLOCK_TYPES.air);
   if (!removed) return false;
   sound.playBlockBreak(blockType);
@@ -565,7 +565,7 @@ function attemptPlaceBlock(forceType = null) {
   if (!controls.isLocked || !worldReady) return false;
   const slot = inventory.getSlot(activeHotbarIndex);
   const blockType = forceType ?? slot?.type;
-  if (!blockType || blockType === BLOCK_TYPES.air) return false;
+  if (!blockType || blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.water) return false;
   refreshRaycaster();
   const target = world.getRaycastTarget(raycaster, { place: true });
   if (!target || target.y < 0 || target.y >= CHUNK_HEIGHT - 1) return false;

@@ -357,9 +357,63 @@ scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 75, 250);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 400);
-const controls = new PointerLockControls(camera, document.body);
+const pointerLockElement = canvas ?? document.body;
+const pointerLockSupported = Boolean(pointerLockElement?.requestPointerLock || pointerLockElement?.mozRequestPointerLock || pointerLockElement?.webkitRequestPointerLock);
+const isTouchCapable = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches;
+const useTouchFallback = isTouchCapable && !pointerLockSupported;
+const TOUCH_LOOK_SENSITIVITY = 1;
+const TOUCH_TAP_MAX_DISTANCE = 18;
+const TOUCH_TAP_MAX_DURATION = 220;
+const TOUCH_DOUBLE_TAP_INTERVAL = 320;
+
+const touchLookState = {
+  id: null,
+  lastX: 0,
+  lastY: 0,
+  startX: 0,
+  startY: 0,
+  startTime: 0,
+  moved: false
+};
+
+let lastTouchTapTime = 0;
+
+const controls = new PointerLockControls(camera, pointerLockElement);
 scene.add(controls.getObject());
 const cameraDirection = new THREE.Vector3();
+
+function requestControlLock() {
+  if (useTouchFallback) {
+    if (!controls.isLocked) {
+      controls.isLocked = true;
+      controls.dispatchEvent({ type: 'lock' });
+    }
+    return;
+  }
+  controls.lock();
+}
+
+function releaseControlLock() {
+  if (useTouchFallback) {
+    if (controls.isLocked) {
+      controls.isLocked = false;
+      controls.dispatchEvent({ type: 'unlock' });
+    }
+    touchLookState.id = null;
+    lastTouchTapTime = 0;
+    return;
+  }
+  controls.unlock();
+}
+
+if (useTouchFallback) {
+  setupTouchFallbackControls();
+  if (overlay) {
+    const paragraphs = overlay.querySelectorAll('p');
+    if (paragraphs[0]) paragraphs[0].textContent = 'Tap to enter. Drag to look around.';
+    if (paragraphs[1]) paragraphs[1].textContent = 'Single tap: remove block · Double tap: place block';
+  }
+}
 
 const hemisphere = new THREE.HemisphereLight(0xffffff, 0x506070, 0.55);
 scene.add(hemisphere);
@@ -400,7 +454,7 @@ overlay.addEventListener('click', () => {
   if (loadingInProgress) return;
   sound.resume();
   if (worldReady) {
-    controls.lock();
+    requestControlLock();
     return;
   }
   startWorldLoading();
@@ -595,6 +649,81 @@ document.addEventListener('mousedown', (event) => {
 document.addEventListener('contextmenu', (event) => {
   if (controls.isLocked) event.preventDefault();
 });
+
+function setupTouchFallbackControls() {
+  if (!canvas) return;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+  canvas.addEventListener('touchend', handleTouchEnd);
+  canvas.addEventListener('touchcancel', handleTouchEnd);
+}
+
+function handleTouchStart(event) {
+  if (!controls.isLocked) return;
+  if (touchLookState.id !== null) return;
+  const touch = event.changedTouches?.[0];
+  if (!touch) return;
+  touchLookState.id = touch.identifier;
+  touchLookState.lastX = touch.clientX;
+  touchLookState.lastY = touch.clientY;
+  touchLookState.startX = touch.clientX;
+  touchLookState.startY = touch.clientY;
+  touchLookState.startTime = performance.now();
+  touchLookState.moved = false;
+  event.preventDefault();
+}
+
+function handleTouchMove(event) {
+  if (touchLookState.id === null || !controls.isLocked) return;
+  const touch = findTouchById(event.changedTouches, touchLookState.id);
+  if (!touch) return;
+  const deltaX = (touch.clientX - touchLookState.lastX) * TOUCH_LOOK_SENSITIVITY;
+  const deltaY = (touch.clientY - touchLookState.lastY) * TOUCH_LOOK_SENSITIVITY;
+  touchLookState.lastX = touch.clientX;
+  touchLookState.lastY = touch.clientY;
+  if (deltaX !== 0 || deltaY !== 0) {
+    controls.rotate(deltaX, deltaY);
+    const totalDx = touch.clientX - touchLookState.startX;
+    const totalDy = touch.clientY - touchLookState.startY;
+    if (!touchLookState.moved && totalDx * totalDx + totalDy * totalDy > TOUCH_TAP_MAX_DISTANCE * TOUCH_TAP_MAX_DISTANCE) {
+      touchLookState.moved = true;
+    }
+  }
+  event.preventDefault();
+}
+
+function handleTouchEnd(event) {
+  const touch = findTouchById(event.changedTouches, touchLookState.id);
+  if (!touch) return;
+  const now = performance.now();
+  const duration = now - touchLookState.startTime;
+  const totalDx = touch.clientX - touchLookState.startX;
+  const totalDy = touch.clientY - touchLookState.startY;
+  const distanceSq = totalDx * totalDx + totalDy * totalDy;
+  const isTap = !touchLookState.moved && distanceSq <= TOUCH_TAP_MAX_DISTANCE * TOUCH_TAP_MAX_DISTANCE && duration <= TOUCH_TAP_MAX_DURATION;
+  touchLookState.id = null;
+  if (!controls.isLocked) return;
+  if (!isTap) return;
+  if (now - lastTouchTapTime <= TOUCH_DOUBLE_TAP_INTERVAL) {
+    lastTouchTapTime = 0;
+    attemptPlaceBlock();
+    event.preventDefault();
+    return;
+  }
+  lastTouchTapTime = now;
+  attemptBreakBlock();
+  event.preventDefault();
+}
+
+function findTouchById(touchList, id) {
+  if (!touchList || id === null) return null;
+  for (let index = 0; index < touchList.length; index += 1) {
+    const touch = touchList.item(index);
+    if (touch?.identifier === id) return touch;
+  }
+  return null;
+}
 
 const clock = new THREE.Clock();
 let hudAccumulator = 0;
@@ -887,7 +1016,7 @@ async function startWorldLoading() {
   setLoadingProgress(0);
   showLoadingOverlay();
   if (loadingLabel) loadingLabel.textContent = 'Loading world…';
-  controls.lock();
+  requestControlLock();
   camera.getWorldDirection(cameraDirection);
   world.updatePlayerView(cameraDirection);
   try {
@@ -1236,7 +1365,7 @@ function updateGamepadState() {
       return;
     }
     if (!controls.isLocked) {
-      controls.lock();
+      requestControlLock();
       return;
     }
     setMovementState('Space', true);
@@ -1251,7 +1380,7 @@ function updateGamepadState() {
       return;
     }
     if (!controls.isLocked) {
-      controls.lock();
+      requestControlLock();
     }
   });
 
@@ -1263,7 +1392,7 @@ function updateGamepadState() {
 
   const breakAction = () => {
     if (!controls.isLocked) {
-      if (worldReady && !loadingInProgress) controls.lock();
+      if (worldReady && !loadingInProgress) requestControlLock();
       return;
     }
     attemptBreakBlock();
@@ -1271,7 +1400,7 @@ function updateGamepadState() {
 
   const placeAction = () => {
     if (!controls.isLocked) {
-      if (worldReady && !loadingInProgress) controls.lock();
+      if (worldReady && !loadingInProgress) requestControlLock();
       return;
     }
     attemptPlaceBlock();

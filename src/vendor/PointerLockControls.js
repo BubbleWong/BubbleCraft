@@ -100,13 +100,49 @@ class PointerLockControls extends EventDispatcher {
 
 	lock() {
 
-		this.domElement.requestPointerLock();
+		const requestPointerLock = this.domElement.requestPointerLock || this.domElement.mozRequestPointerLock || this.domElement.webkitRequestPointerLock;
+
+		if ( typeof requestPointerLock === 'function' ) {
+
+			requestPointerLock.call( this.domElement );
+
+		} else {
+
+			console.warn( 'THREE.PointerLockControls: requestPointerLock is not available on this element.' );
+			this.dispatchEvent( _unlockEvent );
+
+		}
+
+	}
+
+	rotate( movementX, movementY ) {
+
+		if ( movementX === 0 && movementY === 0 ) return;
+
+		const camera = this.camera;
+		_euler.setFromQuaternion( camera.quaternion );
+
+		_euler.y -= movementX * 0.002 * this.pointerSpeed;
+		_euler.x -= movementY * 0.002 * this.pointerSpeed;
+
+		_euler.x = Math.max( _PI_2 - this.maxPolarAngle, Math.min( _PI_2 - this.minPolarAngle, _euler.x ) );
+
+		camera.quaternion.setFromEuler( _euler );
+
+		this.dispatchEvent( _changeEvent );
 
 	}
 
 	unlock() {
 
-		this.domElement.ownerDocument.exitPointerLock();
+		const doc = this.domElement.ownerDocument;
+		const exitPointerLock = doc.exitPointerLock || doc.mozExitPointerLock || doc.webkitExitPointerLock;
+
+		if ( typeof exitPointerLock === 'function' ) {
+
+			exitPointerLock.call( doc );
+
+		}
 
 	}
 
@@ -121,17 +157,7 @@ function onMouseMove( event ) {
 	const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
 	const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
 
-	const camera = this.camera;
-	_euler.setFromQuaternion( camera.quaternion );
-
-	_euler.y -= movementX * 0.002 * this.pointerSpeed;
-	_euler.x -= movementY * 0.002 * this.pointerSpeed;
-
-	_euler.x = Math.max( _PI_2 - this.maxPolarAngle, Math.min( _PI_2 - this.minPolarAngle, _euler.x ) );
-
-	camera.quaternion.setFromEuler( _euler );
-
-	this.dispatchEvent( _changeEvent );
+	this.rotate( movementX, movementY );
 
 }
 

@@ -14,6 +14,12 @@ const loadingPercent = document.getElementById('loading-percent');
 const crosshair = document.getElementById('crosshair');
 const inventoryBar = document.getElementById('inventory');
 const healthBar = document.getElementById('health');
+const touchControls = document.getElementById('touch-controls');
+const movePad = document.getElementById('touch-move-pad');
+const moveKnob = document.getElementById('touch-move-knob');
+const touchJumpButton = document.getElementById('touch-action-jump');
+const touchAttackButton = document.getElementById('touch-action-attack');
+const touchSprintButton = document.getElementById('touch-action-sprint');
 
 const HOTBAR_SLOT_COUNT = 9;
 const MAX_STACK_SIZE = 64;
@@ -378,9 +384,74 @@ const touchLookState = {
 
 let lastTouchTapTime = 0;
 
+const enableVirtualJoystick = isTouchCapable;
+const touchMoveState = { x: 0, y: 0 };
+let activeMovePointerId = null;
+const touchButtonPointers = new Map();
+let touchControlsVisible = false;
+let attackRepeatTimer = null;
+
 const controls = new PointerLockControls(camera, pointerLockElement);
 scene.add(controls.getObject());
 const cameraDirection = new THREE.Vector3();
+
+function hasActiveTouchControl() {
+  return activeMovePointerId !== null || touchButtonPointers.size > 0 || touchLookState.id !== null;
+}
+
+function showTouchControls() {
+  if (!enableVirtualJoystick || !touchControls) return;
+  if (touchControlsVisible) return;
+  touchControls.classList.remove('hidden');
+  touchControls.setAttribute('aria-hidden', 'false');
+  touchControlsVisible = true;
+}
+
+function hideTouchControls(force = false) {
+  if (!enableVirtualJoystick || !touchControls) return;
+  if (!touchControlsVisible) return;
+  if (!force && hasActiveTouchControl()) return;
+  touchControls.classList.add('hidden');
+  touchControls.setAttribute('aria-hidden', 'true');
+  touchControlsVisible = false;
+  touchButtonPointers.clear();
+  activeMovePointerId = null;
+  resetTouchMoveState();
+  clearAttackRepeat();
+}
+
+function registerTouchInput() {
+  if (!enableVirtualJoystick) return;
+  showTouchControls();
+}
+
+function registerNonTouchInput() {
+  if (!enableVirtualJoystick) return;
+  if (!hasActiveTouchControl()) hideTouchControls();
+}
+
+function resetTouchMoveState() {
+  touchMoveState.x = 0;
+  touchMoveState.y = 0;
+  updateMoveKnob();
+}
+
+function updateMoveKnob() {
+  if (!moveKnob || !movePad) return;
+  const padRect = movePad.getBoundingClientRect();
+  const knobRect = moveKnob.getBoundingClientRect();
+  const maxOffsetX = Math.max(0, (padRect.width - knobRect.width) * 0.5);
+  const maxOffsetY = Math.max(0, (padRect.height - knobRect.height) * 0.5);
+  moveKnob.style.setProperty('--knob-x', `${touchMoveState.x * maxOffsetX}px`);
+  moveKnob.style.setProperty('--knob-y', `${-touchMoveState.y * maxOffsetY}px`);
+}
+
+function clearAttackRepeat() {
+  if (attackRepeatTimer !== null) {
+    clearInterval(attackRepeatTimer);
+    attackRepeatTimer = null;
+  }
+}
 
 function requestControlLock() {
   if (useTouchFallback) {
@@ -413,6 +484,12 @@ if (useTouchFallback) {
     if (paragraphs[0]) paragraphs[0].textContent = 'Tap to enter. Drag to look around.';
     if (paragraphs[1]) paragraphs[1].textContent = 'Single tap: remove block · Double tap: place block';
   }
+}
+
+if (enableVirtualJoystick) {
+  setupVirtualJoystick();
+} else {
+  hideTouchControls(true);
 }
 
 const hemisphere = new THREE.HemisphereLight(0xffffff, 0x506070, 0.55);
@@ -460,12 +537,21 @@ overlay.addEventListener('click', () => {
   startWorldLoading();
 });
 
+overlay.addEventListener('pointerdown', (event) => {
+  if (isTouchPointer(event)) {
+    registerTouchInput();
+  } else {
+    registerNonTouchInput();
+  }
+});
+
 function releaseGamepadControls() {
   setMovementState('ShiftLeft', false);
   setMovementState('Space', false);
 }
 
 window.addEventListener('gamepadconnected', (event) => {
+  registerNonTouchInput();
   if (gamepadState.index === -1) gamepadState.index = event.gamepad.index;
   gamepadState.connected = true;
 });
@@ -576,6 +662,7 @@ function setMovementState(code, pressed) {
 const LOOK_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 document.addEventListener('keydown', (event) => {
+  registerNonTouchInput();
   if (event.repeat) return;
   const handledInventory = handleInventoryKeyDown(event);
   if (LOOK_KEYS.has(event.code)) event.preventDefault();
@@ -584,6 +671,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('keyup', (event) => {
+  registerNonTouchInput();
   if (LOOK_KEYS.has(event.code)) event.preventDefault();
   setMovementState(event.code, false);
 });
@@ -596,6 +684,7 @@ function refreshRaycaster() {
 }
 
 document.addEventListener('wheel', (event) => {
+  registerNonTouchInput();
   if (!controls.isLocked) return;
   if (handleInventoryWheel(event.deltaY)) event.preventDefault();
 }, { passive: false });
@@ -637,6 +726,7 @@ function attemptPlaceBlock(forceType = null) {
 }
 
 document.addEventListener('mousedown', (event) => {
+  registerNonTouchInput();
   if (!controls.isLocked) return;
   if (event.button === 0) {
     attemptBreakBlock();
@@ -660,6 +750,7 @@ function setupTouchFallbackControls() {
 }
 
 function handleTouchStart(event) {
+  registerTouchInput();
   if (!controls.isLocked) return;
   if (touchLookState.id !== null) return;
   const touch = event.changedTouches?.[0];
@@ -675,6 +766,7 @@ function handleTouchStart(event) {
 }
 
 function handleTouchMove(event) {
+  registerTouchInput();
   if (touchLookState.id === null || !controls.isLocked) return;
   const touch = findTouchById(event.changedTouches, touchLookState.id);
   if (!touch) return;
@@ -723,6 +815,233 @@ function findTouchById(touchList, id) {
     if (touch?.identifier === id) return touch;
   }
   return null;
+}
+
+function setupVirtualJoystick() {
+  updateMoveKnob();
+  hideTouchControls(true);
+
+  window.addEventListener('pointerdown', handleGlobalPointerDown, { passive: true });
+  window.addEventListener('wheel', handleGlobalWheel, { passive: true });
+  window.addEventListener('mousemove', handleGlobalMouseMove, { passive: true });
+
+  if (movePad) {
+    movePad.addEventListener('pointerdown', handleMovePadPointerDown);
+    movePad.addEventListener('pointermove', handleMovePadPointerMove);
+    movePad.addEventListener('pointerup', handleMovePadPointerUp);
+    movePad.addEventListener('pointercancel', handleMovePadPointerUp);
+  }
+
+  bindJumpButton();
+  bindAttackButton();
+  bindSprintButton();
+}
+
+function handleGlobalPointerDown(event) {
+  if (isTouchPointer(event)) {
+    registerTouchInput();
+  } else {
+    registerNonTouchInput();
+  }
+}
+
+function handleGlobalWheel() {
+  registerNonTouchInput();
+}
+
+function handleGlobalMouseMove(event) {
+  if (typeof event.movementX === 'number' || typeof event.movementY === 'number') {
+    if (event.movementX !== 0 || event.movementY !== 0) registerNonTouchInput();
+  } else {
+    registerNonTouchInput();
+  }
+}
+
+function isTouchPointer(event) {
+  return event.pointerType === 'touch';
+}
+
+function handleMovePadPointerDown(event) {
+  if (!isTouchPointer(event)) {
+    registerNonTouchInput();
+    return;
+  }
+  registerTouchInput();
+  event.preventDefault();
+  if (typeof movePad.setPointerCapture === 'function') {
+    try {
+      movePad.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // ignore if capture fails
+    }
+  }
+  activeMovePointerId = event.pointerId;
+  updateMovePadFromEvent(event);
+}
+
+function handleMovePadPointerMove(event) {
+  if (event.pointerId !== activeMovePointerId) return;
+  registerTouchInput();
+  event.preventDefault();
+  updateMovePadFromEvent(event);
+}
+
+function handleMovePadPointerUp(event) {
+  if (event.pointerId !== activeMovePointerId) return;
+  if (typeof movePad.releasePointerCapture === 'function') {
+    try {
+      movePad.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      // ignore release issues
+    }
+  }
+  activeMovePointerId = null;
+  resetTouchMoveState();
+}
+
+function updateMovePadFromEvent(event) {
+  if (!movePad) return;
+  const rect = movePad.getBoundingClientRect();
+  const centerX = rect.left + rect.width * 0.5;
+  const centerY = rect.top + rect.height * 0.5;
+  let dx = event.clientX - centerX;
+  let dy = event.clientY - centerY;
+  const radius = rect.width * 0.5;
+  const distance = Math.hypot(dx, dy);
+  if (distance > radius) {
+    const scale = radius / distance;
+    dx *= scale;
+    dy *= scale;
+  }
+  const normX = THREE.MathUtils.clamp(dx / radius, -1, 1);
+  const normY = THREE.MathUtils.clamp(-dy / radius, -1, 1);
+  touchMoveState.x = normX;
+  touchMoveState.y = normY;
+  updateMoveKnob();
+}
+
+function bindJumpButton() {
+  if (!touchJumpButton) return;
+  touchJumpButton.addEventListener('pointerdown', (event) => {
+    if (!isTouchPointer(event)) {
+      registerNonTouchInput();
+      return;
+    }
+    registerTouchInput();
+    event.preventDefault();
+    sound.resume();
+    touchButtonPointers.set(event.pointerId, 'jump');
+    if (typeof touchJumpButton.setPointerCapture === 'function') {
+      try {
+        touchJumpButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    requestControlLock();
+    setMovementState('Space', true);
+  });
+
+  const handleEnd = (event) => {
+    if (touchButtonPointers.get(event.pointerId) !== 'jump') return;
+    touchButtonPointers.delete(event.pointerId);
+    if (typeof touchJumpButton.releasePointerCapture === 'function') {
+      try {
+        touchJumpButton.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release issues
+      }
+    }
+  };
+
+  touchJumpButton.addEventListener('pointerup', handleEnd);
+  touchJumpButton.addEventListener('pointercancel', handleEnd);
+}
+
+function bindAttackButton() {
+  if (!touchAttackButton) return;
+  touchAttackButton.addEventListener('pointerdown', (event) => {
+    if (!isTouchPointer(event)) {
+      registerNonTouchInput();
+      return;
+    }
+    registerTouchInput();
+    event.preventDefault();
+    sound.resume();
+    touchButtonPointers.set(event.pointerId, 'attack');
+    if (typeof touchAttackButton.setPointerCapture === 'function') {
+      try {
+        touchAttackButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    requestControlLock();
+    attemptBreakBlock();
+    clearAttackRepeat();
+    attackRepeatTimer = window.setInterval(() => {
+      if (!touchButtonPointers.has(event.pointerId)) {
+        clearAttackRepeat();
+        return;
+      }
+      attemptBreakBlock();
+    }, 200);
+  });
+
+  const handleEnd = (event) => {
+    if (touchButtonPointers.get(event.pointerId) !== 'attack') return;
+    touchButtonPointers.delete(event.pointerId);
+    if (typeof touchAttackButton.releasePointerCapture === 'function') {
+      try {
+        touchAttackButton.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release issues
+      }
+    }
+    clearAttackRepeat();
+  };
+
+  touchAttackButton.addEventListener('pointerup', handleEnd);
+  touchAttackButton.addEventListener('pointercancel', handleEnd);
+}
+
+function bindSprintButton() {
+  if (!touchSprintButton) return;
+  touchSprintButton.addEventListener('pointerdown', (event) => {
+    if (!isTouchPointer(event)) {
+      registerNonTouchInput();
+      return;
+    }
+    registerTouchInput();
+    event.preventDefault();
+    sound.resume();
+    touchButtonPointers.set(event.pointerId, 'sprint');
+    if (typeof touchSprintButton.setPointerCapture === 'function') {
+      try {
+        touchSprintButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    requestControlLock();
+    setMovementState('ShiftLeft', true);
+  });
+
+  const handleEnd = (event) => {
+    if (touchButtonPointers.get(event.pointerId) !== 'sprint') return;
+    touchButtonPointers.delete(event.pointerId);
+    if (typeof touchSprintButton.releasePointerCapture === 'function') {
+      try {
+        touchSprintButton.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release issues
+      }
+    }
+    setMovementState('ShiftLeft', false);
+  };
+
+  touchSprintButton.addEventListener('pointerup', handleEnd);
+  touchSprintButton.addEventListener('pointercancel', handleEnd);
 }
 
 const clock = new THREE.Clock();
@@ -818,8 +1137,10 @@ function updatePhysics(delta) {
 
   const digitalZ = Number(keyState.forward) - Number(keyState.backward);
   const digitalX = Number(keyState.right) - Number(keyState.left);
-  direction.z = digitalZ + gamepadState.moveY;
-  direction.x = digitalX + gamepadState.moveX;
+  const analogZ = gamepadState.moveY + touchMoveState.y;
+  const analogX = gamepadState.moveX + touchMoveState.x;
+  direction.z = digitalZ + analogZ;
+  direction.x = digitalX + analogX;
   const dirLength = direction.length();
   if (dirLength > 1) {
     direction.divideScalar(dirLength);
@@ -1344,6 +1665,9 @@ function updateGamepadState() {
   gamepadState.lookY = THREE.MathUtils.clamp(applyDeadzone(-axis3, GAMEPAD_LOOK_DEADZONE), -1, 1);
 
   const buttons = pad.buttons ?? [];
+  const usedAnalog = Math.abs(axis0) > GAMEPAD_MOVE_DEADZONE || Math.abs(axis1) > GAMEPAD_MOVE_DEADZONE || Math.abs(axis2) > GAMEPAD_LOOK_DEADZONE || Math.abs(axis3) > GAMEPAD_LOOK_DEADZONE;
+  const usedButton = buttons.some((button) => button?.pressed || (button?.value ?? 0) > GAMEPAD_BUTTON_THRESHOLD);
+  if (usedAnalog || usedButton) registerNonTouchInput();
   const isPressed = (index, threshold = GAMEPAD_BUTTON_THRESHOLD) => {
     const button = buttons[index];
     if (!button) return false;

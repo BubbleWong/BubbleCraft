@@ -26,6 +26,18 @@
     <div id="health" class="health hidden" aria-live="polite" aria-label="Health"></div>
     <div id="crosshair" class="crosshair hidden" aria-hidden="true"></div>
     <div id="inventory" class="inventory" aria-live="polite" aria-label="Inventory hotbar"></div>
+    <div id="touch-controls" class="touch-controls hidden" aria-hidden="true">
+      <div class="touch-controls__movement" aria-label="Movement">
+        <div id="touch-move-pad" class="move-pad" role="application" aria-roledescription="virtual joystick">
+          <div id="touch-move-knob" class="move-pad__knob"></div>
+        </div>
+      </div>
+      <div class="touch-controls__actions" aria-label="Actions">
+        <button id="touch-action-jump" type="button" class="touch-button touch-button--jump">Jump</button>
+        <button id="touch-action-attack" type="button" class="touch-button touch-button--attack">Break</button>
+        <button id="touch-action-sprint" type="button" class="touch-button touch-button--sprint">Sprint</button>
+      </div>
+    </div>
     <canvas id="game"></canvas>
     <script type="module" src="./src/main.js"></script>
   </body>

@@ -207,6 +207,103 @@ canvas#game {
   overflow: hidden;
 }
 
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.touch-controls.hidden {
+  opacity: 0;
+}
+
+.touch-controls__movement,
+.touch-controls__actions {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.touch-controls.hidden .touch-controls__movement,
+.touch-controls.hidden .touch-controls__actions {
+  pointer-events: none;
+}
+
+.touch-controls__movement {
+  left: 1.5rem;
+  bottom: 1.5rem;
+}
+
+.touch-controls__actions {
+  right: 1.5rem;
+  bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.move-pad {
+  position: relative;
+  width: min(33vw, 9rem);
+  height: min(33vw, 9rem);
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(180, 220, 255, 0.25), rgba(40, 62, 90, 0.65));
+  border: 2px solid rgba(130, 190, 255, 0.35);
+  box-shadow: 0 20px 35px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(5px);
+  touch-action: none;
+}
+
+.move-pad__knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42%;
+  height: 42%;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(120, 180, 255, 0.75));
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 12px 18px rgba(0, 0, 0, 0.25);
+  transform: translate(calc(-50% + var(--knob-x, 0px)), calc(-50% + var(--knob-y, 0px)));
+  transition: transform 60ms ease;
+  pointer-events: none;
+}
+
+.touch-button {
+  min-width: min(28vw, 6.2rem);
+  min-height: min(12vw, 3.2rem);
+  padding: 0.6rem 1.2rem;
+  border-radius: 1.5rem;
+  border: none;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #0b1320;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+  touch-action: manipulation;
+}
+
+.touch-button:active {
+  transform: scale(0.95);
+}
+
+.touch-button--jump {
+  background: linear-gradient(140deg, #9ffcf8, #70b7ff);
+}
+
+.touch-button--attack {
+  background: linear-gradient(140deg, #ffaf9f, #ff7e79);
+}
+
+.touch-button--sprint {
+  background: linear-gradient(140deg, #f3ff99, #aef46b);
+}
+
 .inventory__slot--active {
   border-color: rgba(255, 210, 102, 0.9);
   box-shadow: 0 0 12px rgba(255, 210, 102, 0.6);

@@ -421,6 +421,7 @@ function hideTouchControls(force = false) {
   resetTouchMoveState();
   clearAttackRepeat();
   clearPlaceRepeat();
+  setSprintActive('touch', false);
 }
 
 function registerTouchInput() {
@@ -583,7 +584,7 @@ overlay.addEventListener('pointerdown', (event) => {
 });
 
 function releaseGamepadControls() {
-  setMovementState('ShiftLeft', false);
+  setSprintActive('gamepad', false);
   setMovementState('Space', false);
 }
 
@@ -638,9 +639,13 @@ const velocity = new THREE.Vector3(0, 0, 0);
 const direction = new THREE.Vector3();
 const playerHeight = 1.75;
 const gravity = 40;
-const walkAcceleration = 140;
-const sprintMultiplier = 1.75;
+const walkAcceleration = 80;
+const sprintMultiplier = 1.3;
 const jumpImpulse = 15;
+
+const sprintSources = new Set();
+const KEYBOARD_SPRINT_DOUBLE_TAP_INTERVAL = 280;
+let lastForwardTapTime = 0;
 
 const SAMPLE_OFFSETS = [
   [0, 0],
@@ -654,10 +659,28 @@ const SAMPLE_OFFSETS = [
   [-PLAYER_RADIUS * 0.707, -PLAYER_RADIUS * 0.707],
 ];
 
+function setSprintActive(source, active) {
+  if (active) {
+    sprintSources.add(source);
+  } else {
+    sprintSources.delete(source);
+  }
+  keyState.sprint = sprintSources.size > 0;
+}
+
+function handleForwardDoubleTap() {
+  const now = performance.now();
+  if (lastForwardTapTime !== 0 && now - lastForwardTapTime <= KEYBOARD_SPRINT_DOUBLE_TAP_INTERVAL && controls.isLocked) {
+    setSprintActive('doubleTap', true);
+  }
+  lastForwardTapTime = now;
+}
+
 function setMovementState(code, pressed) {
   switch (code) {
     case 'KeyW':
       keyState.forward = pressed;
+      if (!pressed) setSprintActive('doubleTap', false);
       break;
     case 'KeyS':
       keyState.backward = pressed;
@@ -670,7 +693,7 @@ function setMovementState(code, pressed) {
       break;
     case 'ShiftLeft':
     case 'ShiftRight':
-      keyState.sprint = pressed;
+      setSprintActive(code, pressed);
       break;
     case 'ArrowUp':
       keyState.lookUp = pressed;
@@ -704,6 +727,7 @@ document.addEventListener('keydown', (event) => {
   const handledInventory = handleInventoryKeyDown(event);
   if (LOOK_KEYS.has(event.code)) event.preventDefault();
   if (handledInventory) event.preventDefault();
+  if (event.code === 'KeyW') handleForwardDoubleTap();
   setMovementState(event.code, true);
 });
 
@@ -1109,7 +1133,7 @@ function bindSprintButton() {
       }
     }
     requestControlLock();
-    setMovementState('ShiftLeft', true);
+    setSprintActive('touch', true);
   });
 
   const handleEnd = (event) => {
@@ -1122,7 +1146,7 @@ function bindSprintButton() {
         // ignore release issues
       }
     }
-    setMovementState('ShiftLeft', false);
+    setSprintActive('touch', false);
   };
 
   touchSprintButton.addEventListener('pointerup', handleEnd);
@@ -1794,9 +1818,9 @@ function updateGamepadState() {
   });
 
   handleButton(10, () => {
-    setMovementState('ShiftLeft', true);
+    setSprintActive('gamepad', true);
   }, () => {
-    setMovementState('ShiftLeft', false);
+    setSprintActive('gamepad', false);
   });
 
   const breakAction = () => {

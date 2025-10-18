@@ -19,6 +19,7 @@ const movePad = document.getElementById('touch-move-pad');
 const moveKnob = document.getElementById('touch-move-knob');
 const touchJumpButton = document.getElementById('touch-action-jump');
 const touchAttackButton = document.getElementById('touch-action-attack');
+const touchPlaceButton = document.getElementById('touch-action-place');
 const touchSprintButton = document.getElementById('touch-action-sprint');
 
 const HOTBAR_SLOT_COUNT = 9;
@@ -390,6 +391,7 @@ let activeMovePointerId = null;
 const touchButtonPointers = new Map();
 let touchControlsVisible = false;
 let attackRepeatTimer = null;
+let placeRepeatTimer = null;
 
 const controls = new PointerLockControls(camera, pointerLockElement);
 scene.add(controls.getObject());
@@ -418,6 +420,7 @@ function hideTouchControls(force = false) {
   activeMovePointerId = null;
   resetTouchMoveState();
   clearAttackRepeat();
+  clearPlaceRepeat();
 }
 
 function registerTouchInput() {
@@ -453,6 +456,38 @@ function clearAttackRepeat() {
   }
 }
 
+function clearPlaceRepeat() {
+  if (placeRepeatTimer !== null) {
+    clearInterval(placeRepeatTimer);
+    placeRepeatTimer = null;
+  }
+}
+
+function disablePageZoom() {
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  if (viewportMeta) {
+    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+  }
+
+  const blockGesture = (event) => {
+    event.preventDefault();
+  };
+
+  window.addEventListener('gesturestart', blockGesture, { passive: false });
+  window.addEventListener('gesturechange', blockGesture, { passive: false });
+  window.addEventListener('gestureend', blockGesture, { passive: false });
+
+  window.addEventListener('wheel', (event) => {
+    if (event.ctrlKey) event.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (event) => {
+    if (typeof event.scale === 'number' && event.scale !== 1) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+}
+
 function requestControlLock() {
   if (useTouchFallback) {
     if (!controls.isLocked) {
@@ -485,6 +520,8 @@ if (useTouchFallback) {
     if (paragraphs[1]) paragraphs[1].textContent = 'Single tap: remove block · Double tap: place block';
   }
 }
+
+disablePageZoom();
 
 if (enableVirtualJoystick) {
   setupVirtualJoystick();
@@ -834,6 +871,7 @@ function setupVirtualJoystick() {
 
   bindJumpButton();
   bindAttackButton();
+  bindPlaceButton();
   bindSprintButton();
 }
 
@@ -1003,6 +1041,53 @@ function bindAttackButton() {
 
   touchAttackButton.addEventListener('pointerup', handleEnd);
   touchAttackButton.addEventListener('pointercancel', handleEnd);
+}
+
+function bindPlaceButton() {
+  if (!touchPlaceButton) return;
+  touchPlaceButton.addEventListener('pointerdown', (event) => {
+    if (!isTouchPointer(event)) {
+      registerNonTouchInput();
+      return;
+    }
+    registerTouchInput();
+    event.preventDefault();
+    sound.resume();
+    touchButtonPointers.set(event.pointerId, 'place');
+    if (typeof touchPlaceButton.setPointerCapture === 'function') {
+      try {
+        touchPlaceButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    requestControlLock();
+    attemptPlaceBlock();
+    clearPlaceRepeat();
+    placeRepeatTimer = window.setInterval(() => {
+      if (!touchButtonPointers.has(event.pointerId)) {
+        clearPlaceRepeat();
+        return;
+      }
+      attemptPlaceBlock();
+    }, 200);
+  });
+
+  const handleEnd = (event) => {
+    if (touchButtonPointers.get(event.pointerId) !== 'place') return;
+    touchButtonPointers.delete(event.pointerId);
+    if (typeof touchPlaceButton.releasePointerCapture === 'function') {
+      try {
+        touchPlaceButton.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release issues
+      }
+    }
+    clearPlaceRepeat();
+  };
+
+  touchPlaceButton.addEventListener('pointerup', handleEnd);
+  touchPlaceButton.addEventListener('pointercancel', handleEnd);
 }
 
 function bindSprintButton() {

@@ -629,6 +629,7 @@ const keyState = {
   left: false,
   right: false,
   sprint: false,
+  crouchHold: false,
   lookUp: false,
   lookDown: false,
   lookLeft: false,
@@ -637,7 +638,12 @@ const keyState = {
 let canJump = false;
 const velocity = new THREE.Vector3(0, 0, 0);
 const direction = new THREE.Vector3();
-const playerHeight = 1.75;
+const STAND_HEIGHT = 1.75;
+const CROUCH_HEIGHT = 1.35;
+const CROUCH_SPEED_MULTIPLIER = 0.3;
+let playerHeight = STAND_HEIGHT;
+let isCrouching = false;
+let crouchToggleActive = false;
 const gravity = 40;
 const walkAcceleration = 80;
 const sprintMultiplier = 1.3;
@@ -660,12 +666,94 @@ const SAMPLE_OFFSETS = [
 ];
 
 function setSprintActive(source, active) {
+  if (active && isCrouching) {
+    active = false;
+  }
   if (active) {
     sprintSources.add(source);
   } else {
     sprintSources.delete(source);
   }
   keyState.sprint = sprintSources.size > 0;
+}
+
+function withTouchCrouchButton(callback) {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('touch-action-crouch');
+  if (!el) return;
+  callback(el);
+}
+
+function updateCrouchIndicator() {
+  withTouchCrouchButton((el) => {
+    if (!el || !el.classList || typeof el.classList.toggle !== 'function') return;
+    try {
+      el.classList.toggle('touch-button--active', isCrouching);
+      el.setAttribute('aria-pressed', String(isCrouching));
+    } catch (error) {
+      console.warn('Failed to update crouch indicator', error);
+    }
+  });
+}
+
+function syncCrouchState() {
+  const target = keyState.crouchHold || crouchToggleActive;
+  if (target === isCrouching && playerHeight === (target ? CROUCH_HEIGHT : STAND_HEIGHT)) {
+    updateCrouchIndicator();
+    return;
+  }
+
+  if (!worldReady) {
+    isCrouching = target;
+    playerHeight = target ? CROUCH_HEIGHT : STAND_HEIGHT;
+    updateCrouchIndicator();
+    return;
+  }
+
+  const object = controls.getObject();
+  if (!object) {
+    isCrouching = target;
+    playerHeight = target ? CROUCH_HEIGHT : STAND_HEIGHT;
+    updateCrouchIndicator();
+    return;
+  }
+
+  const previousHeight = playerHeight;
+  const nextHeight = target ? CROUCH_HEIGHT : STAND_HEIGHT;
+  if (previousHeight === nextHeight && isCrouching === target) {
+    updateCrouchIndicator();
+    return;
+  }
+
+  const previousY = object.position.y;
+  playerHeight = nextHeight;
+  object.position.y += nextHeight - previousHeight;
+
+  if (collidesAt(object.position)) {
+    object.position.y = previousY;
+    playerHeight = previousHeight;
+    updateCrouchIndicator();
+    return;
+  }
+
+  if (target) {
+    if (sprintSources.size > 0) sprintSources.clear();
+    keyState.sprint = false;
+  }
+
+  isCrouching = target;
+  updateCrouchIndicator();
+}
+
+function setCrouchHold(active) {
+  if (keyState.crouchHold === active) return;
+  keyState.crouchHold = active;
+  syncCrouchState();
+}
+
+function toggleCrouch() {
+  crouchToggleActive = !crouchToggleActive;
+  syncCrouchState();
 }
 
 function handleForwardDoubleTap() {
@@ -693,7 +781,7 @@ function setMovementState(code, pressed) {
       break;
     case 'ShiftLeft':
     case 'ShiftRight':
-      setSprintActive(code, pressed);
+      setCrouchHold(pressed);
       break;
     case 'ArrowUp':
       keyState.lookUp = pressed;
@@ -897,6 +985,7 @@ function setupVirtualJoystick() {
   bindAttackButton();
   bindPlaceButton();
   bindSprintButton();
+  bindCrouchButton();
 }
 
 function handleGlobalPointerDown(event) {
@@ -1153,6 +1242,36 @@ function bindSprintButton() {
   touchSprintButton.addEventListener('pointercancel', handleEnd);
 }
 
+function attachCrouchButtonListener(el) {
+  updateCrouchIndicator();
+  el.addEventListener('pointerdown', (event) => {
+    if (!isTouchPointer(event)) {
+      registerNonTouchInput();
+      return;
+    }
+    registerTouchInput();
+    event.preventDefault();
+    sound.resume();
+    requestControlLock();
+    toggleCrouch();
+  });
+}
+
+function bindCrouchButton() {
+  let initialized = false;
+  withTouchCrouchButton((el) => {
+    initialized = true;
+    attachCrouchButtonListener(el);
+  });
+  if (!initialized && typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+      withTouchCrouchButton((el) => {
+        attachCrouchButtonListener(el);
+      });
+    }, { once: true });
+  }
+}
+
 const clock = new THREE.Clock();
 let hudAccumulator = 0;
 let fpsAccumulatorTime = 0;
@@ -1235,6 +1354,10 @@ function updatePhysics(delta) {
   if (!worldReady || !controls.isLocked) return;
 
   const object = controls.getObject();
+  const shouldCrouch = keyState.crouchHold || crouchToggleActive;
+  if (shouldCrouch !== isCrouching) {
+    syncCrouchState();
+  }
   resolvePenetration(object.position, velocity);
   const previousPosition = object.position.clone();
   const previousGround = currentGroundHeight;
@@ -1255,7 +1378,8 @@ function updatePhysics(delta) {
     direction.divideScalar(dirLength);
   }
 
-  const accel = walkAcceleration * (keyState.sprint ? sprintMultiplier : 1);
+  const speedMultiplier = isCrouching ? CROUCH_SPEED_MULTIPLIER : (keyState.sprint ? sprintMultiplier : 1);
+  const accel = walkAcceleration * speedMultiplier;
 
   if (direction.z !== 0) velocity.z -= direction.z * accel * delta;
   if (direction.x !== 0) velocity.x -= direction.x * accel * delta;
@@ -1300,6 +1424,18 @@ function updatePhysics(delta) {
     object.position.z = prevZ;
     velocity.x = 0;
     velocity.z = 0;
+  }
+
+  if (isCrouching && groundedBefore) {
+    const footAfter = object.position.y - playerHeight;
+    const surfaceAfter = highestGroundUnder(object.position, footAfter + 0.1);
+    const distanceAfter = footAfter - surfaceAfter;
+    if (distanceAfter > 0.15) {
+      object.position.x = prevX;
+      object.position.z = prevZ;
+      velocity.x = 0;
+      velocity.z = 0;
+    }
   }
 
   object.position.y += velocity.y * delta;
@@ -1732,6 +1868,11 @@ function handlePlayerDeath() {
   currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
   takeoffGroundHeight = currentGroundHeight;
   maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+  crouchToggleActive = false;
+  keyState.crouchHold = false;
+  isCrouching = false;
+  playerHeight = STAND_HEIGHT;
+  updateCrouchIndicator();
 }
 
 function updateGamepadState() {
@@ -1821,6 +1962,11 @@ function updateGamepadState() {
     setSprintActive('gamepad', true);
   }, () => {
     setSprintActive('gamepad', false);
+  });
+
+  handleButton(1, () => {
+    if (!worldReady || !controls.isLocked) return;
+    toggleCrouch();
   });
 
   const breakAction = () => {

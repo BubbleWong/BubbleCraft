@@ -9,7 +9,7 @@
   <body>
     <div id="overlay" class="overlay">
       <h1>Bubble Craft</h1>
-      <p>Click to enter. Use WASD to move, space to jump. Double-tap W to sprint.</p>
+      <p>Click to enter. Use WASD to move, space to jump, hold Shift to crouch. Double-tap W to sprint.</p>
       <p>Left click: remove block · Right click: place block</p>
     </div>
     <div id="hud" class="hud" aria-live="polite"></div>
@@ -37,6 +37,12 @@
         <button id="touch-action-attack" type="button" class="touch-button touch-button--attack">Break</button>
         <button id="touch-action-place" type="button" class="touch-button touch-button--place">Place</button>
         <button id="touch-action-sprint" type="button" class="touch-button touch-button--sprint">Sprint</button>
+        <button
+          id="touch-action-crouch"
+          type="button"
+          class="touch-button touch-button--crouch"
+          aria-pressed="false"
+        >Crouch</button>
       </div>
     </div>
     <canvas id="game"></canvas>

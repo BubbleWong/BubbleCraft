@@ -310,6 +310,15 @@ canvas#game {
   background: linear-gradient(140deg, #f3ff99, #aef46b);
 }
 
+.touch-button--crouch {
+  background: linear-gradient(140deg, #c9daff, #7ab6ff);
+}
+
+.touch-button--active {
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+
 .inventory__slot--active {
   border-color: rgba(255, 210, 102, 0.9);
   box-shadow: 0 0 12px rgba(255, 210, 102, 0.6);

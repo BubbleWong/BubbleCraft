@@ -33,6 +33,35 @@ const GAMEPAD_LOOK_SENSITIVITY = THREE.MathUtils.degToRad(210);
 const GAMEPAD_TRIGGER_THRESHOLD = 0.4;
 const GAMEPAD_BUTTON_THRESHOLD = 0.3;
 
+const WEATHER_TYPES = Object.freeze({
+  SUNNY: 'sunny',
+  RAIN: 'rain',
+  SNOW: 'snow',
+  THUNDERSTORM: 'thunderstorm',
+});
+
+const TIME_OF_DAY = Object.freeze({
+  DAY: 'day',
+  NIGHT: 'night',
+});
+
+const WEATHER_SELECTION = [
+  { type: WEATHER_TYPES.SUNNY, weight: 0.62 },
+  { type: WEATHER_TYPES.RAIN, weight: 0.25 },
+  { type: WEATHER_TYPES.SNOW, weight: 0.08 },
+  { type: WEATHER_TYPES.THUNDERSTORM, weight: 0.05 },
+];
+
+const WEATHER_DURATION_RANGE_MS = [120_000, 240_000];
+const TIME_OF_DAY_DURATION_RANGE_MS = [180_000, 360_000];
+
+const PRECIPITATION_COUNT = 900;
+const PRECIPITATION_WIDTH = 55;
+const PRECIPITATION_HEIGHT = 45;
+const PRECIPITATION_RESET_PADDING = 4;
+const PRECIPITATION_VERTICAL_OFFSET = 10;
+const WEATHER_TRANSITION_SPEED = 0.35;
+
 const MATERIAL_SOUND_PROFILE = {
   [BLOCK_TYPES.grass]: { stepCutoff: 1200, breakCutoff: 1500, breakQ: 1.2, placeFreq: 440 },
   [BLOCK_TYPES.dirt]: { stepCutoff: 900, breakCutoff: 900, breakQ: 1.4, placeFreq: 410 },
@@ -265,6 +294,588 @@ class SoundManager {
       data[i] = (Math.random() * 2 - 1) * (1 - i / length);
     }
     return buffer;
+  }
+}
+
+const WEATHER_CONFIG = {
+  [WEATHER_TYPES.SUNNY]: {
+    precipitation: null,
+    lightningFrequency: 0,
+    day: {
+      sky: 0x87ceeb,
+      fog: 0xaed9ff,
+      fogNear: 85,
+      fogFar: 300,
+      sunIntensity: 0.95,
+      sunColor: 0xfff6d5,
+      hemisphereIntensity: 0.58,
+      hemiSky: 0xfff7e5,
+      hemiGround: 0x4a545d,
+    },
+    night: {
+      sky: 0x050c19,
+      fog: 0x070d18,
+      fogNear: 32,
+      fogFar: 130,
+      sunIntensity: 0.18,
+      sunColor: 0xbfd2ff,
+      hemisphereIntensity: 0.24,
+      hemiSky: 0x16253a,
+      hemiGround: 0x02060a,
+    },
+  },
+  [WEATHER_TYPES.RAIN]: {
+    precipitation: {
+      type: 'rain',
+      speedRange: [14, 24],
+      size: 0.12,
+      opacity: 0.72,
+      color: 0x6aa9ff,
+      drift: { x: [-6, -2], z: [-2, 2] },
+    },
+    lightningFrequency: 0,
+    day: {
+      sky: 0x6c7c88,
+      fog: 0x6c7c88,
+      fogNear: 55,
+      fogFar: 160,
+      sunIntensity: 0.55,
+      sunColor: 0xe3e8f0,
+      hemisphereIntensity: 0.52,
+      hemiSky: 0xcdd5df,
+      hemiGround: 0x384249,
+    },
+    night: {
+      sky: 0x1b2731,
+      fog: 0x1b2731,
+      fogNear: 28,
+      fogFar: 100,
+      sunIntensity: 0.12,
+      sunColor: 0xb5c2d0,
+      hemisphereIntensity: 0.22,
+      hemiSky: 0x243646,
+      hemiGround: 0x0c1115,
+    },
+  },
+  [WEATHER_TYPES.SNOW]: {
+    precipitation: {
+      type: 'snow',
+      speedRange: [3, 7],
+      size: 0.32,
+      opacity: 0.9,
+      color: 0xffffff,
+      drift: { x: [-1.2, 1.2], z: [-1.2, 1.2] },
+    },
+    lightningFrequency: 0,
+    day: {
+      sky: 0xbfd8ff,
+      fog: 0xcde0ff,
+      fogNear: 70,
+      fogFar: 200,
+      sunIntensity: 0.65,
+      sunColor: 0xf0fbff,
+      hemisphereIntensity: 0.6,
+      hemiSky: 0xffffff,
+      hemiGround: 0x8897a6,
+    },
+    night: {
+      sky: 0x1d2b3c,
+      fog: 0x223144,
+      fogNear: 32,
+      fogFar: 110,
+      sunIntensity: 0.12,
+      sunColor: 0xe0e9ff,
+      hemisphereIntensity: 0.28,
+      hemiSky: 0x2c3f55,
+      hemiGround: 0x0d1219,
+    },
+  },
+  [WEATHER_TYPES.THUNDERSTORM]: {
+    precipitation: {
+      type: 'rain',
+      speedRange: [18, 32],
+      size: 0.14,
+      opacity: 0.78,
+      color: 0x9cc7ff,
+      drift: { x: [-9, -3], z: [-3, 3] },
+    },
+    lightningFrequency: 0.28,
+    day: {
+      sky: 0x303a45,
+      fog: 0x303a45,
+      fogNear: 45,
+      fogFar: 120,
+      sunIntensity: 0.45,
+      sunColor: 0xf3f6ff,
+      hemisphereIntensity: 0.5,
+      hemiSky: 0xb9c7d8,
+      hemiGround: 0x2b333b,
+    },
+    night: {
+      sky: 0x0d131d,
+      fog: 0x0d131d,
+      fogNear: 25,
+      fogFar: 90,
+      sunIntensity: 0.1,
+      sunColor: 0xcad7e8,
+      hemisphereIntensity: 0.2,
+      hemiSky: 0x1f2d3f,
+      hemiGround: 0x05080c,
+    },
+  },
+};
+
+class WeatherSystem {
+  constructor({ scene, sun, hemisphere, fog, controls, camera }) {
+    this.scene = scene;
+    this.sun = sun;
+    this.hemisphere = hemisphere;
+    this.fog = fog ?? null;
+    this.controls = controls;
+    this.camera = camera;
+    this.playerObject = controls?.getObject?.() ?? camera;
+
+    this.autoWeatherEnabled = true;
+    this.autoTimeEnabled = true;
+    this.currentWeather = WEATHER_TYPES.SUNNY;
+    this.currentTimeOfDay = TIME_OF_DAY.DAY;
+    this.nextWeatherChangeAt = Number.POSITIVE_INFINITY;
+    this.nextTimeOfDayChangeAt = Number.POSITIVE_INFINITY;
+
+    this.skyColor = this.scene.background instanceof THREE.Color
+      ? this.scene.background.clone()
+      : new THREE.Color(0x87ceeb);
+    this.targetSkyColor = this.skyColor.clone();
+    this.fogColor = this.fog?.color?.clone?.() ?? new THREE.Color(0x87ceeb);
+    this.targetFogColor = this.fogColor.clone();
+    this.sunColor = this.sun.color.clone();
+    this.targetSunColor = this.sun.color.clone();
+    this.hemisphereSkyColor = this.hemisphere.color.clone();
+    this.targetHemisphereSkyColor = this.hemisphere.color.clone();
+    this.hemisphereGroundColor = this.hemisphere.groundColor.clone();
+    this.targetHemisphereGroundColor = this.hemisphere.groundColor.clone();
+    this.currentSunIntensity = this.sun.intensity;
+    this.targetSunIntensity = this.sun.intensity;
+    this.currentHemisphereIntensity = this.hemisphere.intensity;
+    this.targetHemisphereIntensity = this.hemisphere.intensity;
+    this.targetFogNear = this.fog?.near ?? 75;
+    this.targetFogFar = this.fog?.far ?? 250;
+
+    this.transitionColor = new THREE.Color();
+    this.transitionFogColor = new THREE.Color();
+    this.flashColor = new THREE.Color(0xf6fbff);
+    this.flashIntensity = 0;
+    this.lightningCooldown = 0;
+
+    this.precipSpeedRange = [10, 16];
+    this.precipDriftRange = { x: [-1, 1], z: [-1, 1] };
+    this.setupPrecipitation();
+
+    this.lightningLight = new THREE.PointLight(0xfefbff, 0, 220, 2);
+    this.lightningLight.castShadow = false;
+    this.lightningLight.intensity = 0;
+    this.scene.add(this.lightningLight);
+
+    this.updateTargetsFromState(true);
+    this.configurePrecipitation(WEATHER_CONFIG[this.currentWeather]);
+    this.scheduleNextWeatherChange();
+    this.scheduleNextTimeOfDayChange();
+    this.exposeDebugHelpers();
+  }
+
+  setupPrecipitation() {
+    this.precipitationPositions = new Float32Array(PRECIPITATION_COUNT * 3);
+    this.precipitationSpeeds = new Float32Array(PRECIPITATION_COUNT);
+    this.precipitationDriftX = new Float32Array(PRECIPITATION_COUNT);
+    this.precipitationDriftZ = new Float32Array(PRECIPITATION_COUNT);
+    this.precipitationGeometry = new THREE.BufferGeometry();
+    this.precipitationGeometry.setAttribute('position', new THREE.BufferAttribute(this.precipitationPositions, 3));
+    this.precipitationGeometry.computeBoundingSphere();
+
+    this.rainMaterial = new THREE.PointsMaterial({
+      color: 0x6aa9ff,
+      size: 0.12,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    });
+    this.snowMaterial = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.32,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+
+    this.precipitation = new THREE.Points(this.precipitationGeometry, this.rainMaterial);
+    this.precipitation.visible = false;
+    this.precipitation.frustumCulled = false;
+
+    this.precipitationGroup = new THREE.Group();
+    this.precipitationGroup.add(this.precipitation);
+    this.precipitationGroup.visible = false;
+    this.scene.add(this.precipitationGroup);
+    this.precipitationEnabled = false;
+  }
+
+  update(delta) {
+    this.updateTimers();
+    this.updateLightning(delta);
+    this.updateEnvironment(delta);
+    this.updatePrecipitation(delta);
+    this.dissipateLightning(delta);
+  }
+
+  updateTimers() {
+    const now = performance.now();
+    if (this.autoWeatherEnabled && now >= this.nextWeatherChangeAt) {
+      const nextWeather = this.pickWeightedWeather();
+      if (nextWeather !== this.currentWeather) {
+        this.setWeather(nextWeather);
+      } else {
+        this.scheduleNextWeatherChange();
+      }
+    }
+    if (this.autoTimeEnabled && now >= this.nextTimeOfDayChangeAt) {
+      const nextTime = this.currentTimeOfDay === TIME_OF_DAY.DAY ? TIME_OF_DAY.NIGHT : TIME_OF_DAY.DAY;
+      this.setTimeOfDay(nextTime);
+    }
+  }
+
+  updateEnvironment(delta) {
+    const t = Math.min(1, delta * WEATHER_TRANSITION_SPEED);
+    this.skyColor.lerp(this.targetSkyColor, t);
+    this.fogColor.lerp(this.targetFogColor, t);
+    this.sunColor.lerp(this.targetSunColor, t);
+    this.hemisphereSkyColor.lerp(this.targetHemisphereSkyColor, t);
+    this.hemisphereGroundColor.lerp(this.targetHemisphereGroundColor, t);
+    this.currentSunIntensity = THREE.MathUtils.lerp(this.currentSunIntensity, this.targetSunIntensity, t);
+    this.currentHemisphereIntensity = THREE.MathUtils.lerp(this.currentHemisphereIntensity, this.targetHemisphereIntensity, t);
+
+    if (this.fog) {
+      this.fog.near = THREE.MathUtils.lerp(this.fog.near, this.targetFogNear, t);
+      this.fog.far = THREE.MathUtils.lerp(this.fog.far, this.targetFogFar, t);
+    }
+
+    const flashFactor = Math.min(1, this.flashIntensity);
+    const currentSky = flashFactor > 0
+      ? this.transitionColor.copy(this.skyColor).lerp(this.flashColor, flashFactor * 0.6)
+      : this.skyColor;
+    const currentFog = flashFactor > 0
+      ? this.transitionFogColor.copy(this.fogColor).lerp(this.flashColor, flashFactor * 0.4)
+      : this.fogColor;
+
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(currentSky);
+    } else {
+      this.scene.background = currentSky.clone();
+    }
+    if (this.fog) this.fog.color.copy(currentFog);
+
+    this.sun.color.copy(this.sunColor);
+    this.sun.intensity = this.currentSunIntensity + flashFactor * 0.8;
+    this.hemisphere.color.copy(this.hemisphereSkyColor);
+    this.hemisphere.groundColor.copy(this.hemisphereGroundColor);
+    this.hemisphere.intensity = this.currentHemisphereIntensity;
+  }
+
+  updatePrecipitation(delta) {
+    if (!this.precipitationEnabled) return;
+
+    const halfWidth = PRECIPITATION_WIDTH * 0.5;
+    const positions = this.precipitationPositions;
+    for (let i = 0; i < PRECIPITATION_COUNT; i += 1) {
+      const index = i * 3;
+      positions[index] += this.precipitationDriftX[i] * delta;
+      positions[index + 2] += this.precipitationDriftZ[i] * delta;
+      positions[index + 1] -= this.precipitationSpeeds[i] * delta;
+
+      if (positions[index + 1] < -PRECIPITATION_RESET_PADDING) {
+        this.resetPrecipitationParticle(i, false);
+        continue;
+      }
+
+      if (positions[index] < -halfWidth || positions[index] > halfWidth) {
+        positions[index] = THREE.MathUtils.randFloatSpread(PRECIPITATION_WIDTH);
+      }
+      if (positions[index + 2] < -halfWidth || positions[index + 2] > halfWidth) {
+        positions[index + 2] = THREE.MathUtils.randFloatSpread(PRECIPITATION_WIDTH);
+      }
+    }
+
+    this.precipitationGeometry.attributes.position.needsUpdate = true;
+
+    const playerPosition = this.getPlayerPosition();
+    if (playerPosition) {
+      this.precipitationGroup.position.set(
+        playerPosition.x,
+        playerPosition.y + PRECIPITATION_VERTICAL_OFFSET,
+        playerPosition.z,
+      );
+    }
+  }
+
+  updateLightning(delta) {
+    const config = WEATHER_CONFIG[this.currentWeather];
+    const frequency = config?.lightningFrequency ?? 0;
+    if (frequency <= 0) {
+      this.lightningCooldown = 0;
+      return;
+    }
+
+    this.lightningCooldown -= delta;
+    if (this.lightningCooldown <= 0) {
+      const chance = Math.min(1, frequency * delta);
+      if (Math.random() < chance) {
+        this.triggerLightning();
+      } else {
+        this.lightningCooldown = THREE.MathUtils.randFloat(0.4, 1.4);
+      }
+    }
+  }
+
+  dissipateLightning(delta) {
+    if (this.flashIntensity > 0) {
+      this.flashIntensity = Math.max(0, this.flashIntensity - delta * 2.6);
+    }
+    if (this.lightningLight.intensity > 0) {
+      this.lightningLight.intensity = Math.max(0, this.lightningLight.intensity - delta * 8);
+    }
+  }
+
+  triggerLightning() {
+    const playerPosition = this.getPlayerPosition();
+    if (playerPosition) {
+      this.lightningLight.position.set(
+        playerPosition.x + THREE.MathUtils.randFloatSpread(60),
+        playerPosition.y + 20 + Math.random() * 25,
+        playerPosition.z + THREE.MathUtils.randFloatSpread(60),
+      );
+    }
+    this.lightningLight.intensity = 10 + Math.random() * 4;
+    this.flashIntensity = 1;
+    this.lightningCooldown = THREE.MathUtils.randFloat(1.2, 3.6);
+  }
+
+  setWeather(weather, options = {}) {
+    if (!WEATHER_CONFIG[weather]) return;
+    if (weather === this.currentWeather && !options.force) {
+      if (this.autoWeatherEnabled) this.scheduleNextWeatherChange();
+      return;
+    }
+    this.currentWeather = weather;
+    if (typeof options.autoWeather === 'boolean') this.autoWeatherEnabled = options.autoWeather;
+    this.updateTargetsFromState(Boolean(options.instant));
+    this.configurePrecipitation(WEATHER_CONFIG[weather]);
+    if (this.autoWeatherEnabled) this.scheduleNextWeatherChange();
+    else this.nextWeatherChangeAt = Number.POSITIVE_INFINITY;
+  }
+
+  setTimeOfDay(timeOfDay, options = {}) {
+    const normalized = timeOfDay === TIME_OF_DAY.NIGHT ? TIME_OF_DAY.NIGHT : TIME_OF_DAY.DAY;
+    if (normalized === this.currentTimeOfDay && !options.force) {
+      if (this.autoTimeEnabled) this.scheduleNextTimeOfDayChange();
+      return;
+    }
+    this.currentTimeOfDay = normalized;
+    if (typeof options.autoTime === 'boolean') this.autoTimeEnabled = options.autoTime;
+    this.updateTargetsFromState(Boolean(options.instant));
+    if (this.autoTimeEnabled) this.scheduleNextTimeOfDayChange();
+    else this.nextTimeOfDayChangeAt = Number.POSITIVE_INFINITY;
+  }
+
+  configurePrecipitation(config) {
+    const settings = config?.precipitation ?? null;
+    if (!settings) {
+      this.precipitationEnabled = false;
+      this.precipitation.visible = false;
+      this.precipitationGroup.visible = false;
+      return;
+    }
+
+    this.precipitationEnabled = true;
+    this.precipitation.visible = true;
+    this.precipitationGroup.visible = true;
+
+    const material = settings.type === 'snow' ? this.snowMaterial : this.rainMaterial;
+    material.size = settings.size ?? material.size;
+    material.opacity = settings.opacity ?? material.opacity;
+    material.color.set(settings.color ?? material.color.getHex());
+    material.needsUpdate = true;
+    this.precipitation.material = material;
+
+    this.precipSpeedRange = settings.speedRange ?? this.precipSpeedRange;
+    this.precipDriftRange = settings.drift ?? { x: [-1, 1], z: [-1, 1] };
+    this.resetAllPrecipitation(true);
+  }
+
+  resetAllPrecipitation(initial = false) {
+    for (let i = 0; i < PRECIPITATION_COUNT; i += 1) {
+      this.resetPrecipitationParticle(i, initial);
+    }
+    this.precipitationGeometry.attributes.position.needsUpdate = true;
+    this.precipitationGeometry.computeBoundingSphere();
+  }
+
+  resetPrecipitationParticle(index, randomizeHeight) {
+    const posIndex = index * 3;
+    this.precipitationPositions[posIndex] = THREE.MathUtils.randFloatSpread(PRECIPITATION_WIDTH);
+    this.precipitationPositions[posIndex + 2] = THREE.MathUtils.randFloatSpread(PRECIPITATION_WIDTH);
+    if (randomizeHeight) {
+      this.precipitationPositions[posIndex + 1] = THREE.MathUtils.randFloat(0, PRECIPITATION_HEIGHT);
+    } else {
+      this.precipitationPositions[posIndex + 1] = PRECIPITATION_HEIGHT + Math.random() * PRECIPITATION_RESET_PADDING;
+    }
+
+    const [minSpeed, maxSpeed] = this.precipSpeedRange;
+    this.precipitationSpeeds[index] = THREE.MathUtils.randFloat(minSpeed, maxSpeed);
+
+    if (this.precipDriftRange) {
+      const { x, z } = this.precipDriftRange;
+      this.precipitationDriftX[index] = THREE.MathUtils.randFloat(x[0], x[1]);
+      this.precipitationDriftZ[index] = THREE.MathUtils.randFloat(z[0], z[1]);
+    } else {
+      this.precipitationDriftX[index] = 0;
+      this.precipitationDriftZ[index] = 0;
+    }
+  }
+
+  updateTargetsFromState(instant = false) {
+    const config = WEATHER_CONFIG[this.currentWeather] ?? WEATHER_CONFIG[WEATHER_TYPES.SUNNY];
+    const timeConfig = config[this.currentTimeOfDay] ?? config.day;
+
+    this.targetSkyColor.set(timeConfig.sky ?? 0x87ceeb);
+    this.targetFogColor.set(timeConfig.fog ?? timeConfig.sky ?? 0x87ceeb);
+    this.targetSunColor.set(timeConfig.sunColor ?? 0xffffff);
+    this.targetHemisphereSkyColor.set(timeConfig.hemiSky ?? this.hemisphere.color.getHex());
+    this.targetHemisphereGroundColor.set(timeConfig.hemiGround ?? this.hemisphere.groundColor.getHex());
+    this.targetSunIntensity = timeConfig.sunIntensity ?? this.sun.intensity;
+    this.targetHemisphereIntensity = timeConfig.hemisphereIntensity ?? this.hemisphere.intensity;
+    this.targetFogNear = timeConfig.fogNear ?? this.fog?.near ?? 75;
+    this.targetFogFar = timeConfig.fogFar ?? this.fog?.far ?? 250;
+
+    if (instant) {
+      this.skyColor.copy(this.targetSkyColor);
+      this.fogColor.copy(this.targetFogColor);
+      this.sunColor.copy(this.targetSunColor);
+      this.hemisphereSkyColor.copy(this.targetHemisphereSkyColor);
+      this.hemisphereGroundColor.copy(this.targetHemisphereGroundColor);
+      this.currentSunIntensity = this.targetSunIntensity;
+      this.currentHemisphereIntensity = this.targetHemisphereIntensity;
+      if (this.fog) {
+        this.fog.near = this.targetFogNear;
+        this.fog.far = this.targetFogFar;
+        this.fog.color.copy(this.fogColor);
+      }
+      if (this.scene.background instanceof THREE.Color) {
+        this.scene.background.copy(this.skyColor);
+      } else {
+        this.scene.background = this.skyColor.clone();
+      }
+      this.sun.color.copy(this.sunColor);
+      this.sun.intensity = this.currentSunIntensity;
+      this.hemisphere.color.copy(this.hemisphereSkyColor);
+      this.hemisphere.groundColor.copy(this.hemisphereGroundColor);
+      this.hemisphere.intensity = this.currentHemisphereIntensity;
+    }
+  }
+
+  scheduleNextWeatherChange() {
+    if (!this.autoWeatherEnabled) {
+      this.nextWeatherChangeAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    const duration = THREE.MathUtils.randFloat(WEATHER_DURATION_RANGE_MS[0], WEATHER_DURATION_RANGE_MS[1]);
+    this.nextWeatherChangeAt = performance.now() + duration;
+  }
+
+  scheduleNextTimeOfDayChange() {
+    if (!this.autoTimeEnabled) {
+      this.nextTimeOfDayChangeAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    const duration = THREE.MathUtils.randFloat(TIME_OF_DAY_DURATION_RANGE_MS[0], TIME_OF_DAY_DURATION_RANGE_MS[1]);
+    this.nextTimeOfDayChangeAt = performance.now() + duration;
+  }
+
+  pickWeightedWeather() {
+    const totalWeight = WEATHER_SELECTION.reduce((sum, entry) => sum + entry.weight, 0);
+    let threshold = Math.random() * totalWeight;
+    for (const entry of WEATHER_SELECTION) {
+      threshold -= entry.weight;
+      if (threshold <= 0) {
+        return entry.type;
+      }
+    }
+    return WEATHER_TYPES.SUNNY;
+  }
+
+  exposeDebugHelpers() {
+    const api = (options = {}) => {
+      if (options.resume === true) {
+        this.autoWeatherEnabled = true;
+        this.autoTimeEnabled = true;
+        this.scheduleNextWeatherChange();
+        this.scheduleNextTimeOfDayChange();
+        return this.getState();
+      }
+
+      if (typeof options.autoWeather === 'boolean') {
+        this.autoWeatherEnabled = options.autoWeather;
+        if (this.autoWeatherEnabled) this.scheduleNextWeatherChange();
+      }
+      if (typeof options.autoTime === 'boolean') {
+        this.autoTimeEnabled = options.autoTime;
+        if (this.autoTimeEnabled) this.scheduleNextTimeOfDayChange();
+      }
+
+      if (typeof options.weather === 'string') {
+        const normalized = options.weather.toLowerCase();
+        if (WEATHER_CONFIG[normalized]) {
+          this.setWeather(normalized, { force: true, instant: options.instant === true });
+        }
+      }
+
+      if (typeof options.timeOfDay === 'string') {
+        const normalized = options.timeOfDay.toLowerCase() === TIME_OF_DAY.NIGHT
+          ? TIME_OF_DAY.NIGHT
+          : TIME_OF_DAY.DAY;
+        this.setTimeOfDay(normalized, { force: true, instant: options.instant === true });
+      }
+
+      return this.getState();
+    };
+
+    api.help = () => (
+      'setWeatherDebug usage:\n' +
+      '  setWeatherDebug({ weather: "rain", timeOfDay: "night" });\n' +
+      'Options: weather="sunny|rain|snow|thunderstorm", timeOfDay="day|night", \n' +
+      'autoWeather=<bool> to re-enable/disable automatic cycling, autoTime=<bool>,\n' +
+      'instant=<bool> for immediate transitions, resume=true to restore defaults.'
+    );
+
+    Object.defineProperty(window, 'setWeatherDebug', {
+      value: api,
+      configurable: true,
+      writable: false,
+    });
+  }
+
+  getState() {
+    return {
+      weather: this.currentWeather,
+      timeOfDay: this.currentTimeOfDay,
+      autoWeather: this.autoWeatherEnabled,
+      autoTime: this.autoTimeEnabled,
+      nextWeatherChangeAt: this.nextWeatherChangeAt,
+      nextTimeOfDayChangeAt: this.nextTimeOfDayChangeAt,
+    };
+  }
+
+  getPlayerPosition() {
+    if (this.playerObject?.position) return this.playerObject.position;
+    if (this.camera?.position) return this.camera.position;
+    return null;
   }
 }
 
@@ -538,6 +1149,7 @@ sun.position.set(60, 120, 40);
 scene.add(sun);
 
 const world = new World(scene);
+const weatherSystem = new WeatherSystem({ scene, sun, hemisphere, fog: scene.fog, controls, camera });
 
 const MAX_STEP_HEIGHT = 1.01;
 const MAX_JUMP_CLEARANCE = 0.1;
@@ -1547,6 +2159,7 @@ function animate() {
   applyKeyboardLook(frameDelta);
   applyGamepadLook(delta);
   updatePhysics(delta);
+  weatherSystem.update(delta);
   hudAccumulator += delta;
   if (hudAccumulator >= 0.2) {
     updateHUD();

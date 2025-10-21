@@ -53,7 +53,8 @@ const WEATHER_SELECTION = [
 ];
 
 const WEATHER_DURATION_RANGE_MS = [120_000, 240_000];
-const TIME_OF_DAY_DURATION_RANGE_MS = [180_000, 360_000];
+const DAY_HALF_CYCLE_MS = 600_000; // 10 minutes per half cycle
+const FULL_DAY_DURATION_MS = DAY_HALF_CYCLE_MS * 2;
 
 const PRECIPITATION_COUNT = 900;
 const PRECIPITATION_WIDTH = 55;
@@ -61,6 +62,18 @@ const PRECIPITATION_HEIGHT = 45;
 const PRECIPITATION_RESET_PADDING = 4;
 const PRECIPITATION_VERTICAL_OFFSET = 10;
 const WEATHER_TRANSITION_SPEED = 0.35;
+
+const WEATHER_LABELS = {
+  [WEATHER_TYPES.SUNNY]: 'Clear',
+  [WEATHER_TYPES.RAIN]: 'Rain',
+  [WEATHER_TYPES.SNOW]: 'Snow',
+  [WEATHER_TYPES.THUNDERSTORM]: 'Thunderstorm',
+};
+
+const TIME_OF_DAY_LABELS = {
+  [TIME_OF_DAY.DAY]: 'Day',
+  [TIME_OF_DAY.NIGHT]: 'Night',
+};
 
 const MATERIAL_SOUND_PROFILE = {
   [BLOCK_TYPES.grass]: { stepCutoff: 1200, breakCutoff: 1500, breakQ: 1.2, placeFreq: 440 },
@@ -794,8 +807,7 @@ class WeatherSystem {
       this.nextTimeOfDayChangeAt = Number.POSITIVE_INFINITY;
       return;
     }
-    const duration = THREE.MathUtils.randFloat(TIME_OF_DAY_DURATION_RANGE_MS[0], TIME_OF_DAY_DURATION_RANGE_MS[1]);
-    this.nextTimeOfDayChangeAt = performance.now() + duration;
+    this.nextTimeOfDayChangeAt = performance.now() + DAY_HALF_CYCLE_MS;
   }
 
   pickWeightedWeather() {
@@ -2334,8 +2346,20 @@ function updateHUD() {
     hud.innerHTML = '';
     return;
   }
+  const lines = [];
+  const weatherState = typeof weatherSystem?.getState === 'function' ? weatherSystem.getState() : null;
+  if (weatherState) {
+    const weatherLabel = WEATHER_LABELS[weatherState.weather] ?? weatherState.weather;
+    const timeLabel = TIME_OF_DAY_LABELS[weatherState.timeOfDay] ?? weatherState.timeOfDay;
+    const flags = [];
+    if (!weatherState.autoWeather) flags.push('manual weather');
+    if (!weatherState.autoTime) flags.push('manual time');
+    const flagSuffix = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+    lines.push(`Weather: ${weatherLabel} · ${timeLabel}${flagSuffix}`);
+  }
+
   const pos = controls.getObject().position;
-  const lines = [`XYZ: ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`];
+  lines.push(`XYZ: ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`);
   const totals = world.getBlockTotals();
   let typeCount = 0;
   const blockLines = [];

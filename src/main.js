@@ -1185,6 +1185,7 @@ let currentGroundHeight = 0;
 let maxClimbHeight = MAX_STEP_HEIGHT;
 let wasGroundedPrevious = true;
 let takeoffGroundHeight = 0;
+let takeoffFootHeight = 0;
 const lastSafePosition = new THREE.Vector3();
 let lastCrosshairVisible = false;
 let footstepDistanceAccumulator = 0;
@@ -2080,15 +2081,14 @@ function updatePhysics(delta) {
   if (wasGroundedPrevFrame && !grounded) {
     takeoffGroundHeight = currentGroundHeight;
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    takeoffFootHeight = Math.floor(feetBefore);
   }
 
   if (!wasGroundedPrevFrame && grounded) {
     const landingSurface = Number.isFinite(surface) ? surface : currentGroundHeight;
-    const fallDistance = Math.max(0, takeoffGroundHeight - landingSurface);
-    if (fallDistance > 3) {
-      const damage = Math.floor((fallDistance - 3) * 2);
-      if (damage > 0) applyDamage(damage);
-    }
+    const fallDistance = Math.max(0, takeoffFootHeight - Math.floor(landingSurface));
+    const damage = Math.max(0, fallDistance - 3);
+    if (damage > 0) applyDamage(damage);
   }
 
   if (grounded && surface > maxClimbHeight) {
@@ -2099,6 +2099,7 @@ function updatePhysics(delta) {
     currentGroundHeight = previousGround;
     takeoffGroundHeight = previousGround;
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    takeoffFootHeight = Math.floor(previousGround);
     wasGroundedPrevious = wasGroundedPrevFrame;
     canJump = wasGroundedPrevFrame;
     return;
@@ -2116,6 +2117,7 @@ function updatePhysics(delta) {
       currentGroundHeight = highestGroundUnder(object.position, object.position.y);
       takeoffGroundHeight = currentGroundHeight;
       maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+      takeoffFootHeight = Math.floor(currentGroundHeight);
       wasGroundedPrevious = true;
       canJump = true;
     }
@@ -2131,6 +2133,7 @@ function updatePhysics(delta) {
     currentGroundHeight = surface;
     takeoffGroundHeight = surface;
     maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+    takeoffFootHeight = Math.floor(surface);
   } else {
     canJump = false;
   }
@@ -2253,6 +2256,7 @@ function finalizeWorldLoad() {
   currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
   takeoffGroundHeight = currentGroundHeight;
   maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+  takeoffFootHeight = Math.floor(currentGroundHeight);
   wasGroundedPrevious = true;
   worldReady = true;
   if (hud) hud.classList.remove('hidden');
@@ -2505,6 +2509,7 @@ function handlePlayerDeath() {
   currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
   takeoffGroundHeight = currentGroundHeight;
   maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
+  takeoffFootHeight = Math.floor(currentGroundHeight);
   crouchToggleActive = false;
   keyState.crouchHold = false;
   isCrouching = false;

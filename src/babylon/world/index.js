@@ -610,12 +610,10 @@ export class VoxelWorld {
 
     const stemInfo = this._emitFlowerStem(target, centerX, centerZ, y, scale, worldX, worldY, worldZ);
     const styleSeed = this.random3D(worldX, worldY, worldZ, 905);
-    if (styleSeed > 0.66) {
+    if (styleSeed > 0.5) {
       this._emitFlowerStyleLayered(target, paletteBase, scale, centerX, centerZ, stemInfo, worldX, worldY, worldZ);
-    } else if (styleSeed > 0.33) {
-      this._emitFlowerStylePetalFan(target, paletteBase, scale, centerX, centerZ, stemInfo, worldX, worldY, worldZ);
     } else {
-      this._emitFlowerStyleDaisy(target, paletteBase, scale, centerX, centerZ, stemInfo, worldX, worldY, worldZ);
+      this._emitFlowerStylePetalFan(target, paletteBase, scale, centerX, centerZ, stemInfo, worldX, worldY, worldZ);
     }
   }
 
@@ -720,83 +718,6 @@ export class VoxelWorld {
       this._emitDoubleSidedTri(target, v0, v1, topCenter, normal, [
         this._colorWithAlpha(mixColorArrays(coreColor, edgeColor, 0.2), 0.95),
         this._colorWithAlpha(mixColorArrays(coreColor, edgeColor, 0.2), 0.95),
-        this._colorWithAlpha(coreColor, 0.98),
-      ]);
-    }
-  }
-
-  _emitFlowerStyleDaisy(target, paletteBase, scale, centerX, centerZ, stemInfo, worldX, worldY, worldZ) {
-    const { stemTopCenter, stemTopY } = stemInfo;
-    const petalCount = 14 + Math.floor(this.random3D(worldX, worldY, worldZ, 930) * 8);
-    const petalLength = 0.46 * scale;
-    const petalWidth = 0.12 * scale;
-    const petalCurve = 0.12 * scale;
-    const petalAlpha = 0.9;
-    const petalBaseColor = this._colorWithAlpha(paletteBase.petalBase ?? [0.95, 0.66, 0.84], petalAlpha);
-    const petalEdgeColor = this._colorWithAlpha(paletteBase.petalEdge ?? [0.99, 0.93, 0.63], petalAlpha);
-
-    for (let i = 0; i < petalCount; i += 1) {
-      const angle = (i / petalCount) * Math.PI * 2 + this.random3D(worldX, worldY, worldZ, 931 + i) * 0.1;
-      const dirX = Math.cos(angle);
-      const dirZ = Math.sin(angle);
-      const rightX = -dirZ;
-      const rightZ = dirX;
-      const basePos = [stemTopCenter[0], stemTopY, stemTopCenter[2]];
-      const midPos = [
-        stemTopCenter[0] + dirX * petalLength * 0.55,
-        stemTopY + petalCurve,
-        stemTopCenter[2] + dirZ * petalLength * 0.55,
-      ];
-      const tipPos = [
-        stemTopCenter[0] + dirX * petalLength,
-        stemTopY + petalCurve * 0.6,
-        stemTopCenter[2] + dirZ * petalLength,
-      ];
-
-      const v0 = [basePos[0] - rightX * petalWidth, basePos[1], basePos[2] - rightZ * petalWidth];
-      const v1 = [basePos[0] + rightX * petalWidth, basePos[1], basePos[2] + rightZ * petalWidth];
-      const v2 = [midPos[0] + rightX * petalWidth * 0.65, midPos[1], midPos[2] + rightZ * petalWidth * 0.65];
-      const v3 = [midPos[0] - rightX * petalWidth * 0.65, midPos[1], midPos[2] - rightZ * petalWidth * 0.65];
-      const vTip = [tipPos[0], tipPos[1], tipPos[2]];
-
-      const baseNormal = this._computeQuadNormal(v0, v1, v2);
-      this._emitDoubleSidedQuad(target, [v0, v1, v2, v3], baseNormal, [
-        [...petalBaseColor],
-        [...petalBaseColor],
-        [...petalEdgeColor],
-        [...petalEdgeColor],
-      ]);
-      const tipNormal = this._computeQuadNormal(v3, v2, vTip);
-      this._emitDoubleSidedTri(target, v3, v2, vTip, tipNormal, [
-        this._colorWithAlpha(petalEdgeColor, petalAlpha),
-        this._colorWithAlpha(petalEdgeColor, petalAlpha),
-        this._colorWithAlpha(petalEdgeColor, petalAlpha * 0.9),
-      ]);
-    }
-
-    const coreRadius = 0.18 * scale;
-    const coreColor = this._colorWithAlpha(paletteBase.center ?? FLOWER_CENTER_COLOR, 0.98);
-    const coreSegments = 12;
-    const coreBottom = stemTopY;
-    const coreTop = Math.min(stemTopY + 0.12 * scale, CHUNK_HEIGHT - 0.01);
-    const topCenter = [stemTopCenter[0], coreTop, stemTopCenter[2]];
-    const ring = [];
-    for (let i = 0; i < coreSegments; i += 1) {
-      const t = (i / coreSegments) * Math.PI * 2;
-      ring.push([
-        stemTopCenter[0] + Math.cos(t) * coreRadius,
-        coreBottom + Math.sin(t * 3) * 0.01 * scale,
-        stemTopCenter[2] + Math.sin(t) * coreRadius,
-      ]);
-    }
-    for (let i = 0; i < coreSegments; i += 1) {
-      const next = (i + 1) % coreSegments;
-      const v0 = ring[i];
-      const v1 = ring[next];
-      const normal = this._computeQuadNormal(v0, v1, topCenter);
-      this._emitDoubleSidedTri(target, v0, v1, topCenter, normal, [
-        this._colorWithAlpha(coreColor, 0.96),
-        this._colorWithAlpha(coreColor, 0.96),
         this._colorWithAlpha(coreColor, 0.98),
       ]);
     }

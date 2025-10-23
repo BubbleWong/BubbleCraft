@@ -21,6 +21,7 @@ const TRANSPARENT_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
 const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower, BLOCK_TYPES.water]);
 
 const WORK_CHUNK_RADIUS = 5;
+const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
@@ -47,6 +48,7 @@ class Chunk {
     this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.mesh = null;
     this.waterMesh = null;
+    this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
     this.generate();
   }
 
@@ -66,10 +68,13 @@ class Chunk {
     const prev = this.blocks[idx];
     if (prev === type) return false;
     this.blocks[idx] = type;
+    if (this.counts[prev] > 0) this.counts[prev] -= 1;
+    this.counts[type] += 1;
     return true;
   }
 
   generate() {
+    this.counts.fill(0);
     for (let lx = 0; lx < CHUNK_SIZE; lx += 1) {
       for (let lz = 0; lz < CHUNK_SIZE; lz += 1) {
         const worldX = this.origin.x + lx;
@@ -125,6 +130,7 @@ export class VoxelWorld {
     this.waterMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
 
     this._spawnPoint = new BABYLON.Vector3(0, SEA_LEVEL + 4, 0);
+    this.blockTotals = new Array(MAX_BLOCK_TYPE + 1).fill(0);
   }
 
   async generate(onProgress = null) {
@@ -206,6 +212,7 @@ export class VoxelWorld {
     if (!chunk) {
       chunk = new Chunk(this, cx, cz);
       this.chunks.set(key, chunk);
+      this._applyChunkCounts(chunk, 1);
     }
     return chunk;
   }
@@ -245,6 +252,7 @@ export class VoxelWorld {
   }
 
   _disposeChunk(chunk) {
+    this._applyChunkCounts(chunk, -1);
     this._disposeChunkMeshes(chunk);
   }
 
@@ -350,8 +358,11 @@ export class VoxelWorld {
     const lz = Math.floor(z - chunk.origin.z);
     if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return false;
 
+    const previousType = chunk.get(lx, y, lz);
     const updated = chunk.set(lx, y, lz, blockType);
     if (!updated) return false;
+
+    this._updateBlockTotals(previousType, blockType);
 
     this._buildChunkMeshes(chunk);
 
@@ -398,5 +409,32 @@ export class VoxelWorld {
     }
     if (!best) return new BABYLON.Vector3(0.5, SEA_LEVEL + 4, 0.5);
     return new BABYLON.Vector3(best.x, best.y + 1.8, best.z);
+  }
+
+  getBlockTotals() {
+    return this.blockTotals;
+  }
+
+  _applyChunkCounts(chunk, delta) {
+    if (!chunk?.counts) return;
+    for (let i = 0; i < chunk.counts.length; i += 1) {
+      const amount = chunk.counts[i];
+      if (!amount) continue;
+      const current = this.blockTotals[i] ?? 0;
+      const next = current + delta * amount;
+      this.blockTotals[i] = next < 0 ? 0 : next;
+    }
+  }
+
+  _updateBlockTotals(previousType, nextType) {
+    if (Number.isInteger(previousType) && previousType >= 0) {
+      const current = this.blockTotals[previousType] ?? 0;
+      const next = current - 1;
+      this.blockTotals[previousType] = next < 0 ? 0 : next;
+    }
+    if (Number.isInteger(nextType) && nextType >= 0) {
+      const current = this.blockTotals[nextType] ?? 0;
+      this.blockTotals[nextType] = current + 1;
+    }
   }
 }

@@ -3,7 +3,12 @@ import { PlayerController } from './player.js';
 import { VoxelWorld } from './world/index.js';
 import { HudManager } from './hud.js';
 import { BlockInteraction } from './blockInteraction.js';
-import { BLOCK_TYPES } from '../constants.js';
+import { Inventory, HOTBAR_SLOT_COUNT } from './inventory.js';
+import { WeatherSystem } from './weatherSystem.js';
+
+const HUD_UPDATE_INTERVAL = 0.2;
+const FPS_UPDATE_INTERVAL = 0.5;
+const FPS_SMOOTHING = 0.82;
 
 export class GameApp {
   constructor({ canvas, overlay, crosshair, hud, fpsHud, loadingUi } = {}) {
@@ -22,11 +27,29 @@ export class GameApp {
     this.input = null;
     this.world = null;
     this.player = null;
+    this.inventory = null;
     this.hud = null;
     this.blockInteraction = null;
+    this.weatherSystem = null;
+    this.hemisphereLight = null;
+    this.sunLight = null;
 
-    this._frameAccumulator = 0;
+    this.maxHealth = 20;
+    this.currentHealth = 20;
+    this.activeHotbarIndex = 0;
+    this.hudAccumulator = 0;
+    this._fpsAccumulatorTime = 0;
+    this._fpsFrameCount = 0;
+    this._fpsSmoothed = 0;
     this._started = false;
+
+    this._onCanvasPointerDown = (event) => this._handlePointerDown(event);
+    this._onCanvasContextMenu = (event) => {
+      if (this.input?.isPointerLocked?.()) {
+        event.preventDefault();
+      }
+    };
+    this._onWheel = (event) => this._handleWheel(event);
   }
 
   async init() {
@@ -60,6 +83,7 @@ export class GameApp {
         this.hud?.setPointerLock(locked);
       },
     });
+
     await this._loadWorld();
 
     this._registerUpdateLoop();
@@ -73,24 +97,32 @@ export class GameApp {
     });
 
     window.addEventListener('resize', () => this.engine?.resize());
+    window.addEventListener('wheel', this._onWheel, { passive: false });
   }
 
   dispose() {
-    if (this.input) this.input.dispose();
-    if (this.player) this.player.dispose();
-    if (this.world) this.world.dispose();
-    if (this.scene) this.scene.dispose();
+    if (this.canvas) {
+      this.canvas.removeEventListener('pointerdown', this._onCanvasPointerDown);
+      this.canvas.removeEventListener('contextmenu', this._onCanvasContextMenu);
+    }
+    window.removeEventListener('wheel', this._onWheel);
+    this.input?.dispose();
+    this.player?.dispose();
+    this.world?.dispose();
+    this.scene?.dispose();
     this.engine?.dispose();
     this._started = false;
   }
 
   _createEnvironment() {
-    const ambient = new BABYLON.HemisphericLight('ambient', new BABYLON.Vector3(0.25, 1, 0.3), this.scene);
-    ambient.intensity = 0.55;
+    this.hemisphereLight = new BABYLON.HemisphericLight('ambient', new BABYLON.Vector3(0.25, 1, 0.3), this.scene);
+    this.hemisphereLight.intensity = 0.55;
 
-    const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.36, -0.9, 0.28), this.scene);
-    sun.position = new BABYLON.Vector3(160, 220, -110);
-    sun.intensity = 1.05;
+    this.sunLight = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.36, -0.9, 0.28), this.scene);
+    this.sunLight.position = new BABYLON.Vector3(160, 220, -110);
+    this.sunLight.intensity = 1.05;
+
+    this.weatherSystem = new WeatherSystem({ scene: this.scene, sun: this.sunLight, hemisphere: this.hemisphereLight });
   }
 
   async _loadWorld() {
@@ -109,22 +141,22 @@ export class GameApp {
     });
     this.player.setSpawnPoint(spawnPoint);
 
+    this.inventory = new Inventory(HOTBAR_SLOT_COUNT);
     this.hud = new HudManager({
       hudEl: this.hudEl,
       inventoryEl: this.inventoryEl,
       healthEl: this.healthEl,
     });
+    this.hud.bindInventory(this.inventory);
+    this.currentHealth = this.maxHealth;
+    this.hud.updateHealth(this.currentHealth, this.maxHealth);
+    this.hud.setPointerLock(this.input?.isPointerLocked?.() ?? false);
+    this._exposeHealthApi();
 
     const orientation = this.input.getOrientation?.();
     if (orientation) {
       this.player.setOrientation(orientation);
     }
-
-    const blockPalette = this._createBlockPalette();
-    this.hud.configureInventory(blockPalette);
-    this.hud.setActiveSlot(0);
-    this.hud.updateHealth(20, 20);
-    this.hud.setPointerLock(false);
 
     this.blockInteraction = new BlockInteraction({
       scene: this.scene,
@@ -132,17 +164,17 @@ export class GameApp {
       player: this.player,
       camera: this.camera,
       hud: this.hud,
-      blockPalette,
+      inventory: this.inventory,
+      onInventoryChange: () => this._onInventoryChanged(),
     });
-    this.blockInteraction.setActiveSlot(0);
 
-    if (this.inventoryEl) {
-      this.inventoryEl.classList.toggle('hidden', false);
-    }
+    this._refreshInventoryUI();
+    this._updateHudWorldInfo();
+    this._updateFpsHud(0);
 
     if (this.canvas) {
-      this.canvas.addEventListener('pointerdown', (event) => this._handlePointerDown(event));
-      this.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+      this.canvas.addEventListener('pointerdown', this._onCanvasPointerDown);
+      this.canvas.addEventListener('contextmenu', this._onCanvasContextMenu);
     }
 
     this._setLoadingState(false);
@@ -151,23 +183,32 @@ export class GameApp {
   _registerUpdateLoop() {
     this.scene.onBeforeRenderObservable.add(() => {
       const delta = this.scene.getEngine().getDeltaTime() * 0.001;
-      if (this.player) {
-        const frameInput = this.input.poll();
+      const frameInput = this.input?.poll?.() ?? null;
+
+      if (this.player && frameInput) {
         if (frameInput.hotbarChanged) {
-          this.blockInteraction?.setActiveSlot(frameInput.hotbarIndex);
-          this.hud?.setActiveSlot(frameInput.hotbarIndex);
+          this._setActiveHotbarIndex(frameInput.hotbarIndex);
         }
 
         this.player.update(delta, frameInput);
-        this.blockInteraction?.update();
+        this.blockInteraction?.update(frameInput);
       }
 
-      if (this.fpsHud) {
-        this._frameAccumulator += delta;
-        if (this._frameAccumulator >= 0.33) {
-          this.fpsHud.textContent = `${this.engine.getFps().toFixed(0)} fps`;
-          this._frameAccumulator = 0;
-        }
+      this.weatherSystem?.update(delta);
+
+      this.hudAccumulator += delta;
+      if (this.hudAccumulator >= HUD_UPDATE_INTERVAL) {
+        this._updateHudWorldInfo();
+        this.hudAccumulator = 0;
+      }
+
+      this._fpsAccumulatorTime += delta;
+      this._fpsFrameCount += 1;
+      if (this._fpsAccumulatorTime >= FPS_UPDATE_INTERVAL) {
+        const instantaneous = this._fpsFrameCount / this._fpsAccumulatorTime;
+        this._updateFpsHud(instantaneous);
+        this._fpsAccumulatorTime = 0;
+        this._fpsFrameCount = 0;
       }
     });
   }
@@ -187,22 +228,93 @@ export class GameApp {
     }
   }
 
-  _createBlockPalette() {
-    return [
-      BLOCK_TYPES.grass,
-      BLOCK_TYPES.dirt,
-      BLOCK_TYPES.stone,
-      BLOCK_TYPES.sand,
-      BLOCK_TYPES.wood,
-      BLOCK_TYPES.leaves,
-      BLOCK_TYPES.gold,
-      BLOCK_TYPES.diamond,
-      BLOCK_TYPES.flower,
-    ];
+  _exposeHealthApi() {
+    try {
+      Object.defineProperty(window, 'setHealthPoints', {
+        value: (value) => {
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric)) return;
+          this.currentHealth = Math.max(0, Math.min(this.maxHealth, numeric));
+          this.hud?.updateHealth(this.currentHealth, this.maxHealth);
+        },
+        configurable: true,
+        writable: false,
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('Failed to expose setHealthPoints API', error);
+    }
+  }
+
+  _updateHudWorldInfo() {
+    if (!this.hud || !this.player || !this.world) return;
+    const position = this.player.mesh?.position ?? null;
+    const weatherState = this.weatherSystem?.getState?.() ?? null;
+    const blockTotals = this.world.getBlockTotals?.() ?? null;
+    this.hud.updateWorldInfo({ position, weatherState, blockTotals });
+  }
+
+  _updateFpsHud(fps) {
+    if (!this.fpsHud) return;
+    const clamped = Number.isFinite(fps) ? Math.max(0, fps) : 0;
+    this._fpsSmoothed = this._fpsSmoothed === 0
+      ? clamped
+      : this._fpsSmoothed * FPS_SMOOTHING + clamped * (1 - FPS_SMOOTHING);
+    this.fpsHud.textContent = `FPS: ${this._fpsSmoothed.toFixed(1)}`;
+  }
+
+  _onInventoryChanged() {
+    this._refreshInventoryUI();
+    this._updateHudWorldInfo();
+  }
+
+  _refreshInventoryUI(direction = 1) {
+    if (!this.inventory) return;
+    this._ensureActiveHotbarIndex(direction);
+    this.blockInteraction?.setActiveSlot(this.activeHotbarIndex);
+    this.hud?.setActiveSlot(this.activeHotbarIndex);
+    this.hud?.refreshInventory(this.inventory, this.activeHotbarIndex);
+  }
+
+  _ensureActiveHotbarIndex(direction = 1) {
+    if (!this.inventory || this.inventory.slotCount === 0) return;
+    if (this.inventory.getSlot(this.activeHotbarIndex)) return;
+    const fallback = this.inventory.findNextFilledSlot(this.activeHotbarIndex, direction);
+    if (fallback !== -1) {
+      this.activeHotbarIndex = fallback;
+    }
+  }
+
+  _setActiveHotbarIndex(index) {
+    if (!this.inventory || this.inventory.slotCount === 0) return;
+    const normalized = ((index % this.inventory.slotCount) + this.inventory.slotCount) % this.inventory.slotCount;
+    this.activeHotbarIndex = normalized;
+    this._refreshInventoryUI();
+  }
+
+  _handleWheel(event) {
+    if (!this.input?.isPointerLocked?.()) return;
+    if (this._handleInventoryWheel(event.deltaY)) {
+      event.preventDefault();
+    }
+  }
+
+  _handleInventoryWheel(deltaY) {
+    if (!this.inventory || deltaY === 0) return false;
+    const direction = deltaY > 0 ? 1 : -1;
+    if (this.inventory.slotCount === 0) return false;
+    let nextIndex = (this.activeHotbarIndex + direction + this.inventory.slotCount) % this.inventory.slotCount;
+    if (!this.inventory.getSlot(nextIndex)) {
+      const fallback = this.inventory.findNextFilledSlot(this.activeHotbarIndex, direction);
+      if (fallback !== -1) nextIndex = fallback;
+    }
+    this.activeHotbarIndex = nextIndex;
+    this._refreshInventoryUI(direction);
+    return true;
   }
 
   _handlePointerDown(event) {
-    if (!this.input.isPointerLocked()) return;
+    if (!this.input?.isPointerLocked?.()) return;
     if (event.button === 0) {
       this.blockInteraction?.queueBreak();
     } else if (event.button === 2) {

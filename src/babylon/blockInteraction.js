@@ -1,16 +1,17 @@
-import { BLOCK_TYPE_LABELS, CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES } from '../constants.js';
+import { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES } from '../constants.js';
 
 const MAX_INTERACT_DISTANCE = 6.5;
 const EPSILON = 1e-3;
 
 export class BlockInteraction {
-  constructor({ scene, world, player, camera, hud, blockPalette }) {
+  constructor({ scene, world, player, camera, hud, inventory, onInventoryChange }) {
     this.scene = scene;
     this.world = world;
     this.player = player;
     this.camera = camera;
     this.hud = hud;
-    this.blockPalette = blockPalette;
+    this.inventory = inventory;
+    this.onInventoryChange = onInventoryChange ?? (() => {});
 
     this.activeSlot = 0;
     this.currentTarget = null;
@@ -19,8 +20,7 @@ export class BlockInteraction {
   }
 
   setActiveSlot(index) {
-    if (index < 0 || index >= this.blockPalette.length) return;
-    this.activeSlot = index;
+    this.activeSlot = Math.max(0, index);
   }
 
   queueBreak() {
@@ -31,14 +31,19 @@ export class BlockInteraction {
     this.placeRequested = true;
   }
 
-  update() {
+  update(frameInput) {
+    const pointerLocked = Boolean(frameInput?.pointerLocked);
+    if (!pointerLocked) {
+      this.currentTarget = null;
+      this.breakRequested = false;
+      this.placeRequested = false;
+      this._updateHud(null);
+      return;
+    }
+
     const pickInfo = this._pickSolidBlock();
     this.currentTarget = pickInfo;
-
-    const selectedBlockType = this.blockPalette[this.activeSlot] ?? BLOCK_TYPES.dirt;
-    const targetType = pickInfo?.blockType ?? null;
-    const distance = pickInfo?.distance ?? null;
-    this.hud?.updateStatus({ selectedType: selectedBlockType, targetedType: targetType, distance });
+    this._updateHud(pickInfo);
 
     if (!pickInfo) {
       this.breakRequested = false;
@@ -58,7 +63,21 @@ export class BlockInteraction {
     this.placeRequested = false;
   }
 
+  _updateHud(pickInfo) {
+    const selectedType = this._currentBlockType();
+    const targetedType = pickInfo?.blockType ?? null;
+    const distance = pickInfo?.distance ?? null;
+    this.hud?.updateStatus({ selectedType, targetedType, distance });
+  }
+
+  _currentBlockType() {
+    if (!this.inventory) return BLOCK_TYPES.air;
+    const slot = this.inventory.getSlot(this.activeSlot);
+    return slot?.type ?? BLOCK_TYPES.air;
+  }
+
   _pickSolidBlock() {
+    if (!this.camera) return null;
     const origin = this.camera.getAbsolutePosition?.() ?? this.camera.position.clone();
     const forwardDir = this.camera.getDirection(BABYLON.Axis.Z).normalize();
     const forwardRay = BABYLON.Ray.CreateNewFromTo(origin, origin.add(forwardDir.scale(MAX_INTERACT_DISTANCE)));
@@ -106,7 +125,8 @@ export class BlockInteraction {
   }
 
   _breakBlock(target) {
-    const { chunk, blockX, blockY, blockZ } = target;
+    const { chunk, blockX, blockY, blockZ, blockType } = target;
+    if (blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.water) return;
     const worldX = chunk.origin.x + blockX;
     const worldY = blockY;
     const worldZ = chunk.origin.z + blockZ;
@@ -114,15 +134,19 @@ export class BlockInteraction {
     const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, BLOCK_TYPES.air);
     if (!changed) return;
 
-    this.hud?.updateStatus({
-      selectedType: this.blockPalette[this.activeSlot],
-      targetedType: target.blockType,
-      distance: target.distance,
-    });
+    if (this.inventory) {
+      const remaining = this.inventory.add(blockType, 1);
+      if (remaining < 1) {
+        this.onInventoryChange();
+      }
+    }
   }
 
   _placeBlock(target) {
-    const placeType = this.blockPalette[this.activeSlot] ?? BLOCK_TYPES.dirt;
+    if (!this.inventory) return;
+    const slot = this.inventory.getSlot(this.activeSlot);
+    if (!slot || slot.count <= 0) return;
+    const placeType = slot.type;
     if (placeType === BLOCK_TYPES.air) return;
 
     const { chunk, blockX, blockY, blockZ, normal } = target;
@@ -137,8 +161,8 @@ export class BlockInteraction {
       return;
     }
 
-    // Avoid placing inside the player capsule.
-    const playerPos = this.player.mesh.position;
+    const playerPos = this.player?.mesh?.position;
+    if (!playerPos) return;
     const dx = Math.abs(worldX + 0.5 - playerPos.x);
     const dy = Math.abs(worldY + 0.5 - playerPos.y);
     const dz = Math.abs(worldZ + 0.5 - playerPos.z);
@@ -146,6 +170,12 @@ export class BlockInteraction {
       return;
     }
 
-    this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);
+    const placed = this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);
+    if (!placed) return;
+
+    const removed = this.inventory.removeFromSlot(this.activeSlot, 1);
+    if (removed > 0) {
+      this.onInventoryChange();
+    }
   }
 }

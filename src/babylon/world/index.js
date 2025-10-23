@@ -19,6 +19,7 @@ const FACE_DEFS = [
 const TRIANGLE_ORDER = [0, 2, 1, 0, 3, 2];
 const TRANSPARENT_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
 const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower, BLOCK_TYPES.water]);
+const PASSABLE_BLOCKS = NON_COLLIDING_BLOCKS;
 
 const WORK_CHUNK_RADIUS = 5;
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -99,9 +100,110 @@ class Chunk {
           }
         }
 
-        const flowerChance = this.world.random2D(worldX, worldZ, 97);
-        if (flowerChance > 0.9 && terrainHeight + 1 < CHUNK_HEIGHT && surfaceBlock === BLOCK_TYPES.grass) {
-          this.set(lx, terrainHeight + 1, lz, BLOCK_TYPES.flower);
+        if (surfaceBlock === BLOCK_TYPES.grass && terrainHeight + 1 < CHUNK_HEIGHT) {
+          if (this._maybePlaceTree(lx, terrainHeight, lz, worldX, worldZ)) {
+            continue;
+          }
+          const flowerChance = this.world.random2D(worldX, worldZ, 97);
+          if (flowerChance > 0.88) {
+            this.set(lx, terrainHeight + 1, lz, BLOCK_TYPES.flower);
+          }
+        }
+      }
+    }
+  }
+
+  _maybePlaceTree(lx, groundY, lz, worldX, worldZ) {
+    const treeChance = this.world.random2D(worldX, worldZ, 37);
+    if (treeChance <= 0.82) return false;
+    const heightRand = this.world.random2D(worldX, worldZ, 53);
+    const treeHeight = 4 + Math.floor(heightRand * 3);
+    if (!this._canPlaceTree(lx, groundY, lz, treeHeight)) return false;
+    this._placeTree(lx, groundY, lz, treeHeight, worldX, worldZ);
+    return true;
+  }
+
+  _canPlaceTree(lx, groundY, lz, height) {
+    const radius = 2;
+    if (
+      lx < radius ||
+      lx >= CHUNK_SIZE - radius ||
+      lz < radius ||
+      lz >= CHUNK_SIZE - radius ||
+      groundY + height + 2 >= CHUNK_HEIGHT
+    ) {
+      return false;
+    }
+
+    for (let y = groundY + 1; y <= groundY + height + 2; y += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        for (let dz = -radius; dz <= radius; dz += 1) {
+          const check = this.get(lx + dx, y, lz + dz);
+          if (!PASSABLE_BLOCKS.has(check)) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  _placeTree(lx, groundY, lz, height, worldX, worldZ) {
+    for (let i = 1; i <= height; i += 1) {
+      this.set(lx, groundY + i, lz, BLOCK_TYPES.wood);
+    }
+
+    const canopyTop = groundY + height + 2;
+    for (let y = groundY + height - 1; y <= canopyTop; y += 1) {
+      const layerRadius = Math.max(1, canopyTop - y);
+      for (let dx = -layerRadius; dx <= layerRadius; dx += 1) {
+        for (let dz = -layerRadius; dz <= layerRadius; dz += 1) {
+          const dist = Math.abs(dx) + Math.abs(dz);
+          if (dist > layerRadius + 1) continue;
+          const targetX = lx + dx;
+          const targetY = y;
+          const targetZ = lz + dz;
+          if (
+            targetX < 0 ||
+            targetX >= CHUNK_SIZE ||
+            targetZ < 0 ||
+            targetZ >= CHUNK_SIZE ||
+            targetY >= CHUNK_HEIGHT
+          ) {
+            continue;
+          }
+          if (dx === 0 && dz === 0 && targetY <= groundY + height) continue;
+          if (PASSABLE_BLOCKS.has(this.get(targetX, targetY, targetZ))) {
+            const leafNoise = this.world.random3D(worldX + dx, targetY, worldZ + dz, 113);
+            if (leafNoise > 0.2) {
+              this.set(targetX, targetY, targetZ, BLOCK_TYPES.leaves);
+            }
+          }
+        }
+      }
+    }
+
+    const offsets = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    for (const [dx, dz] of offsets) {
+      const fx = lx + dx;
+      const fz = lz + dz;
+      const flowerY = groundY + 1;
+      if (
+        fx < 0 ||
+        fx >= CHUNK_SIZE ||
+        fz < 0 ||
+        fz >= CHUNK_SIZE ||
+        flowerY >= CHUNK_HEIGHT
+      ) {
+        continue;
+      }
+      if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && PASSABLE_BLOCKS.has(this.get(fx, flowerY, fz))) {
+        const chance = this.world.random2D(worldX + dx * 3, worldZ + dz * 3, 127);
+        if (chance > 0.65) {
+          this.set(fx, flowerY, fz, BLOCK_TYPES.flower);
         }
       }
     }
@@ -187,6 +289,11 @@ export class VoxelWorld {
 
   random2D(x, z, salt = 0) {
     const s = Math.sin((x * 12_989.8 + z * 78_233.1 + (this.seed + salt) * 0.125) * 0.5);
+    return s - Math.floor(s);
+  }
+
+  random3D(x, y, z, salt = 0) {
+    const s = Math.sin((x * 12_989.8 + y * 78_233.1 + z * 37_513.7 + (this.seed + salt) * 0.223) * 0.5);
     return s - Math.floor(s);
   }
 

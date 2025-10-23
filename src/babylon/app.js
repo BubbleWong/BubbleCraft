@@ -58,9 +58,9 @@ export class GameApp {
     this._started = true;
 
     this.engine.runRenderLoop(() => {
-      if (!this.scene || this.scene.isDisposed) {
-        return;
-      }
+      if (!this.scene) return;
+      const disposed = typeof this.scene.isDisposed === 'function' ? this.scene.isDisposed() : false;
+      if (disposed) return;
       this.scene.render();
     });
 

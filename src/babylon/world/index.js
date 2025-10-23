@@ -7,10 +7,6 @@ import {
 } from '../../constants.js';
 import { ImprovedNoise } from '../../vendor/ImprovedNoise.js';
 
-const PHYSICS_PLUGIN_VERSION_V2 =
-  BABYLON.PhysicsPluginVersion?.V2 ??
-  (typeof BABYLON.PhysicsPluginVersion_V2 === 'number' ? BABYLON.PhysicsPluginVersion_V2 : 2);
-
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.82, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] },
   { dir: [-1, 0, 0], shade: 0.82, corners: [[0, 1, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]] },
@@ -20,7 +16,7 @@ const FACE_DEFS = [
   { dir: [0, 0, -1], shade: 0.75, corners: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]] },
 ];
 
-const TRIANGLE_ORDER = [0, 1, 2, 0, 2, 3];
+const TRIANGLE_ORDER = [0, 2, 1, 0, 3, 2];
 const TRANSPARENT_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
 const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower, BLOCK_TYPES.water]);
 
@@ -34,12 +30,11 @@ function chunkKey(cx, cz) {
   return `${cx},${cz}`;
 }
 
-function makeColor(baseColor, faceShade, alpha = 1) {
+function makeColor(baseColor, faceShade) {
   return [
     clamp01(baseColor[0] * faceShade),
     clamp01(baseColor[1] * faceShade),
     clamp01(baseColor[2] * faceShade),
-    alpha,
   ];
 }
 
@@ -115,12 +110,15 @@ export class VoxelWorld {
     this.solidMaterial = new BABYLON.StandardMaterial('vox-solid', scene);
     this.solidMaterial.useVertexColor = true;
     this.solidMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+    this.solidMaterial.useVertexAlpha = true;
 
     this.waterMaterial = new BABYLON.StandardMaterial('vox-water', scene);
     this.waterMaterial.useVertexColor = true;
     this.waterMaterial.alpha = 0.6;
     this.waterMaterial.backFaceCulling = false;
     this.waterMaterial.needDepthPrePass = true;
+    this.waterMaterial.useVertexAlpha = true;
+    this.waterMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
 
     this._spawnPoint = new BABYLON.Vector3(0, SEA_LEVEL + 4, 0);
   }
@@ -252,24 +250,26 @@ export class VoxelWorld {
 
           const target = blockType === BLOCK_TYPES.water ? water : solid;
           const baseColor = BLOCK_COLORS[blockType] ?? [1, 1, 1];
-          const alpha = blockType === BLOCK_TYPES.water ? 0.72 : 1;
 
-          for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
-            const face = FACE_DEFS[faceIndex];
+          for (const face of FACE_DEFS) {
             const neighbor = this._getNeighborBlock(chunk, lx, y, lz, face.dir);
             const transparentNeighbor = TRANSPARENT_BLOCKS.has(neighbor) || (neighbor === BLOCK_TYPES.water && blockType !== BLOCK_TYPES.water);
             if (!transparentNeighbor) continue;
 
-            const color = makeColor(baseColor, face.shade, alpha);
+            const shade = blockType === BLOCK_TYPES.water ? 0.95 : face.shade;
+            const color = makeColor(baseColor, shade);
+            const alpha = blockType === BLOCK_TYPES.water ? 0.68 : 1.0;
             const vertexBase = target.positions.length / 3;
 
-            for (let i = 0; i < TRIANGLE_ORDER.length; i += 1) {
-              const cornerIndex = TRIANGLE_ORDER[i];
-              const corner = face.corners[cornerIndex];
+            for (let i = 0; i < 4; i += 1) {
+              const corner = face.corners[i];
               target.positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
               target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-              target.colors.push(color[0], color[1], color[2], color[3]);
-              target.indices.push(vertexBase + i);
+              target.colors.push(color[0], color[1], color[2], alpha);
+            }
+
+            for (let i = 0; i < TRIANGLE_ORDER.length; i += 1) {
+              target.indices.push(vertexBase + TRIANGLE_ORDER[i]);
             }
           }
         }
@@ -325,7 +325,6 @@ export class VoxelWorld {
     mesh.isPickable = pickable;
     mesh.alphaIndex = alphaIndex;
     mesh.receiveShadows = true;
-    mesh.freezeWorldMatrix();
     return mesh;
   }
 

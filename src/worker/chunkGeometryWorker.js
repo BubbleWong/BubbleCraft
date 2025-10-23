@@ -352,6 +352,7 @@ const vecNormalize = (v) => {
   if (length === 0) return [0, 1, 0];
   return [v[0] / length, v[1] / length, v[2] / length];
 };
+const vecLerp = (a, b, t) => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
 
 const computeNormal = (a, b, c) => vecNormalize(vecCross(vecSub(b, a), vecSub(c, a)));
 
@@ -395,6 +396,30 @@ function emitQuadDoubleSided(positions, normals, colors, vertices, vertexColors)
       normals.push(backNormal[0], backNormal[1], backNormal[2]);
       colors.push(color[0], color[1], color[2]);
     }
+  }
+}
+
+function emitTriangleDoubleSided(positions, normals, colors, vertices, vertexColors) {
+  const [v0, v1, v2] = vertices;
+  let normal = computeNormal(v0, v1, v2);
+  if (!Number.isFinite(normal[0])) normal = [0, 1, 0];
+  const frontOrder = [0, 1, 2];
+  for (const index of frontOrder) {
+    const vertex = vertices[index];
+    const color = vertexColors[index];
+    positions.push(vertex[0], vertex[1], vertex[2]);
+    normals.push(normal[0], normal[1], normal[2]);
+    colors.push(color[0], color[1], color[2]);
+  }
+
+  const backNormal = [-normal[0], -normal[1], -normal[2]];
+  const backOrder = [0, 2, 1];
+  for (const index of backOrder) {
+    const vertex = vertices[index];
+    const color = vertexColors[index];
+    positions.push(vertex[0], vertex[1], vertex[2]);
+    normals.push(backNormal[0], backNormal[1], backNormal[2]);
+    colors.push(color[0], color[1], color[2]);
   }
 }
 
@@ -540,6 +565,147 @@ function addBloomCore(
   }
 }
 
+function addVolumetricPetal(
+  positions,
+  normals,
+  colors,
+  right,
+  bottomCenter,
+  topCenter,
+  bottomHalfWidth,
+  topHalfWidth,
+  bottomColor,
+  topLeftColor,
+  topRightColor,
+  random,
+  worldX,
+  worldY,
+  worldZ,
+  salt,
+) {
+  const segments = 4;
+  const rightDir = vecNormalize(right);
+  const forwardDir = vecNormalize(vecSub(topCenter, bottomCenter));
+  let normalDir = vecCross(rightDir, forwardDir);
+  if (!Number.isFinite(normalDir[0]) || Math.hypot(normalDir[0], normalDir[1], normalDir[2]) < 1e-5) {
+    normalDir = [0, 1, 0];
+  } else {
+    normalDir = vecNormalize(normalDir);
+  }
+
+  const thicknessBase = (0.018 + random.random3D(worldX, worldY, worldZ, salt + 3) * 0.012);
+  const curveAmount = 0.035 + random.random3D(worldX, worldY, worldZ, salt + 6) * 0.05;
+  const flare = 0.88 + random.random3D(worldX, worldY, worldZ, salt + 9) * 0.25;
+  const sections = [];
+
+  for (let i = 0; i <= segments; i += 1) {
+    const t = i / segments;
+    const eased = t * t * (3 - 2 * t); // smoothstep for length blend
+    const shapeEase = Math.pow(eased, 1.35);
+    const width = mix(bottomHalfWidth * 0.18, topHalfWidth * flare, shapeEase);
+    const thickness = thicknessBase * Math.pow(shapeEase, 1.05);
+    const curve = Math.sin(shapeEase * Math.PI) * curveAmount;
+    const centerLinear = vecLerp(bottomCenter, topCenter, t);
+    const center = vecAdd(centerLinear, vecScale(normalDir, curve));
+
+    const leftMid = vecSub(center, vecScale(rightDir, width));
+    const rightMid = vecAdd(center, vecScale(rightDir, width));
+    const frontOffset = vecScale(normalDir, thickness);
+
+    const leftFront = vecAdd(leftMid, frontOffset);
+    const rightFront = vecAdd(rightMid, frontOffset);
+    const leftBack = vecSub(leftMid, frontOffset);
+    const rightBack = vecSub(rightMid, frontOffset);
+
+    const colorLeft = mixColor(bottomColor, topLeftColor, eased);
+    const colorRight = mixColor(bottomColor, topRightColor, eased);
+
+    sections.push({
+      leftFront,
+      rightFront,
+      leftBack,
+      rightBack,
+      colorLeft,
+      colorRight,
+      center,
+      thickness,
+    });
+  }
+
+  for (let i = 0; i < sections.length - 1; i += 1) {
+    const current = sections[i];
+    const next = sections[i + 1];
+
+    emitQuadDoubleSided(
+      positions,
+      normals,
+      colors,
+      [current.leftFront, current.rightFront, next.rightFront, next.leftFront],
+      [current.colorLeft, current.colorRight, next.colorRight, next.colorLeft],
+    );
+    emitQuadDoubleSided(
+      positions,
+      normals,
+      colors,
+      [current.leftBack, current.rightBack, next.rightBack, next.leftBack],
+      [current.colorLeft, current.colorRight, next.colorRight, next.colorLeft],
+    );
+    emitQuadDoubleSided(
+      positions,
+      normals,
+      colors,
+      [current.rightBack, current.rightFront, next.rightFront, next.rightBack],
+      [current.colorRight, current.colorRight, next.colorRight, next.colorRight],
+    );
+    emitQuadDoubleSided(
+      positions,
+      normals,
+      colors,
+      [current.leftFront, current.leftBack, next.leftBack, next.leftFront],
+      [current.colorLeft, current.colorLeft, next.colorLeft, next.colorLeft],
+    );
+  }
+
+  const base = sections[0];
+  const tip = sections[sections.length - 1];
+  if (base.thickness > 1e-4) {
+    const baseFrontCenter = vecAdd(bottomCenter, vecScale(normalDir, base.thickness * 0.6));
+    const baseBackCenter = vecSub(bottomCenter, vecScale(normalDir, base.thickness * 0.6));
+    emitTriangleDoubleSided(
+      positions,
+      normals,
+      colors,
+      [base.leftFront, base.rightFront, baseFrontCenter],
+      [base.colorLeft, base.colorRight, bottomColor],
+    );
+    emitTriangleDoubleSided(
+      positions,
+      normals,
+      colors,
+      [base.rightBack, base.leftBack, baseBackCenter],
+      [base.colorRight, base.colorLeft, bottomColor],
+    );
+  }
+
+  const tipFrontCenter = vecAdd(topCenter, vecScale(normalDir, tip.thickness * 0.6));
+  const tipBackCenter = vecSub(topCenter, vecScale(normalDir, tip.thickness * 0.6));
+  const tipColor = mixColor(topLeftColor, topRightColor, 0.5);
+  emitTriangleDoubleSided(
+    positions,
+    normals,
+    colors,
+    [tip.leftFront, tipFrontCenter, tip.rightFront],
+    [tip.colorLeft, tipColor, tip.colorRight],
+  );
+  emitTriangleDoubleSided(
+    positions,
+    normals,
+    colors,
+    [tip.rightBack, tipBackCenter, tip.leftBack],
+    [tip.colorRight, tipColor, tip.colorLeft],
+  );
+}
+
 function addPetalLayer(
   positions,
   normals,
@@ -561,11 +727,11 @@ function addPetalLayer(
     const angle = rotation + (i / petalCount) * Math.PI * 2;
     const dir = [Math.cos(angle), 0, Math.sin(angle)];
     const right = [-dir[2], 0, dir[0]];
-    const baseOffset = baseRadius * (0.4 + random.random3D(worldX, worldY, worldZ, salt + i) * 0.25);
-    const tipOffset = baseRadius * (0.9 + random.random3D(worldX, worldY, worldZ, salt + 40 + i) * 0.4);
-    const bottomWidth = 0.08 + random.random3D(worldX, worldY, worldZ, salt + 80 + i) * 0.05;
-    const topWidth = bottomWidth * (1.6 + random.random3D(worldX, worldY, worldZ, salt + 120 + i) * 0.7);
-    const sway = (random.random3D(worldX, worldY, worldZ, salt + 160 + i) - 0.5) * baseRadius * 0.4;
+    const baseOffset = baseRadius * (0.48 + random.random3D(worldX, worldY, worldZ, salt + i) * 0.25);
+    const tipOffset = baseRadius * (0.95 + random.random3D(worldX, worldY, worldZ, salt + 40 + i) * 0.4);
+    const bottomWidth = 0.05 + random.random3D(worldX, worldY, worldZ, salt + 80 + i) * 0.03;
+    const topWidth = bottomWidth * (1.8 + random.random3D(worldX, worldY, worldZ, salt + 120 + i) * 0.6);
+    const sway = (random.random3D(worldX, worldY, worldZ, salt + 160 + i) - 0.5) * baseRadius * 0.45;
 
     const bottomCenter = [
       stemTopCenter[0] + dir[0] * baseOffset,
@@ -582,7 +748,7 @@ function addPetalLayer(
     const tipColorLeft = mixColor(palette.petalBase, palette.petalEdge, 0.45 + random.random3D(worldX, worldY, worldZ, salt + 200 + i) * 0.2);
     const tipColorRight = mixColor(palette.petalBase, palette.petalEdge, 0.65 + random.random3D(worldX, worldY, worldZ, salt + 240 + i) * 0.2);
 
-    addTaperedPanel(
+    addVolumetricPetal(
       positions,
       normals,
       colors,
@@ -594,6 +760,131 @@ function addPetalLayer(
       bottomColor,
       tipColorLeft,
       tipColorRight,
+      random,
+      worldX,
+      worldY,
+      worldZ,
+      salt + 400 + i * 17,
+    );
+  }
+}
+
+function addFlowerCalyx(
+  positions,
+  normals,
+  colors,
+  stemTopCenter,
+  bloomBottom,
+  rotation,
+  random,
+  worldX,
+  worldY,
+  worldZ,
+  scale,
+) {
+  const segmentCount = 10 + Math.floor(random.random3D(worldX, worldY, worldZ, 920) * 4);
+  const drop = (0.08 + random.random3D(worldX, worldY, worldZ, 922) * 0.05) * scale;
+  const neckRadius = (0.022 + random.random3D(worldX, worldY, worldZ, 924) * 0.01) * scale;
+  const midRadius = (0.06 + random.random3D(worldX, worldY, worldZ, 926) * 0.015) * scale;
+  const rimRadius = midRadius * (0.7 + random.random3D(worldX, worldY, worldZ, 928) * 0.15);
+
+  const neckColor = lightenColor(FLOWER_STEM_COLOR, 0.08);
+  const midColor = FLOWER_STEM_COLOR;
+  const rimColor = darkenColor(FLOWER_STEM_COLOR, 0.18);
+
+  const profile = [
+    { y: bloomBottom + 0.012 * scale, radius: neckRadius * 0.6, color: mixColor(neckColor, midColor, 0.4) },
+    { y: bloomBottom + 0.001 * scale, radius: neckRadius, color: neckColor },
+    { y: bloomBottom - drop * 0.45, radius: midRadius, color: midColor },
+    { y: bloomBottom - drop, radius: rimRadius, color: rimColor },
+  ];
+
+  const rings = profile.map(() => []);
+  for (let seg = 0; seg < segmentCount; seg += 1) {
+    const angle = rotation + (seg / segmentCount) * Math.PI * 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (let level = 0; level < profile.length; level += 1) {
+      const ring = profile[level];
+      const point = [
+        stemTopCenter[0] + cos * ring.radius,
+        ring.y,
+        stemTopCenter[2] + sin * ring.radius,
+      ];
+      rings[level][seg] = { position: point, color: ring.color };
+    }
+  }
+
+  for (let level = 0; level < profile.length - 1; level += 1) {
+    const thisRing = rings[level];
+    const nextRing = rings[level + 1];
+    for (let seg = 0; seg < segmentCount; seg += 1) {
+      const nextSeg = (seg + 1) % segmentCount;
+      emitQuadDoubleSided(
+        positions,
+        normals,
+        colors,
+        [
+          thisRing[seg].position,
+          thisRing[nextSeg].position,
+          nextRing[nextSeg].position,
+          nextRing[seg].position,
+        ],
+        [
+          thisRing[seg].color,
+          thisRing[nextSeg].color,
+          nextRing[nextSeg].color,
+          nextRing[seg].color,
+        ],
+      );
+    }
+  }
+
+  const topCenter = [
+    stemTopCenter[0],
+    profile[0].y,
+    stemTopCenter[2],
+  ];
+  for (let seg = 0; seg < segmentCount; seg += 1) {
+    const nextSeg = (seg + 1) % segmentCount;
+    emitTriangleDoubleSided(
+      positions,
+      normals,
+      colors,
+      [
+        topCenter,
+        rings[0][nextSeg].position,
+        rings[0][seg].position,
+      ],
+      [
+        profile[0].color,
+        rings[0][nextSeg].color,
+        rings[0][seg].color,
+      ],
+    );
+  }
+
+  const bottomCenter = [
+    stemTopCenter[0],
+    profile[profile.length - 1].y - 0.002 * scale,
+    stemTopCenter[2],
+  ];
+  for (let seg = 0; seg < segmentCount; seg += 1) {
+    const nextSeg = (seg + 1) % segmentCount;
+    emitTriangleDoubleSided(
+      positions,
+      normals,
+      colors,
+      [
+        rings[profile.length - 1][seg].position,
+        rings[profile.length - 1][nextSeg].position,
+        bottomCenter,
+      ],
+      [
+        rings[profile.length - 1][seg].color,
+        rings[profile.length - 1][nextSeg].color,
+        mixColor(rimColor, midColor, 0.35),
+      ],
     );
   }
 }
@@ -688,6 +979,20 @@ function addFlowerGeometry(
     worldY,
     worldZ,
     780,
+  );
+
+  addFlowerCalyx(
+    positions,
+    normals,
+    colors,
+    stemTopCenter,
+    bloomBottom,
+    rotation,
+    random,
+    worldX,
+    worldY,
+    worldZ,
+    scale,
   );
 
   if (random.random3D(worldX, worldY, worldZ, 764) > 0.45) {

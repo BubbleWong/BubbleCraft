@@ -5,6 +5,8 @@ import { HudManager } from './hud.js';
 import { BlockInteraction } from './blockInteraction.js';
 import { Inventory, HOTBAR_SLOT_COUNT } from './inventory.js';
 import { WeatherSystem } from './weatherSystem.js';
+const { PointerEventTypes } = BABYLON;
+import { BLOCK_TYPES } from '../constants.js';
 
 const HUD_UPDATE_INTERVAL = 0.2;
 const FPS_UPDATE_INTERVAL = 0.5;
@@ -33,6 +35,7 @@ export class GameApp {
     this.weatherSystem = null;
     this.hemisphereLight = null;
     this.sunLight = null;
+    this.pointerObserver = null;
 
     this.maxHealth = 20;
     this.currentHealth = 20;
@@ -43,7 +46,6 @@ export class GameApp {
     this._fpsSmoothed = 0;
     this._started = false;
 
-    this._onCanvasPointerDown = (event) => this._handlePointerDown(event);
     this._onCanvasContextMenu = (event) => {
       if (this.input?.isPointerLocked?.()) {
         event.preventDefault();
@@ -102,10 +104,13 @@ export class GameApp {
 
   dispose() {
     if (this.canvas) {
-      this.canvas.removeEventListener('pointerdown', this._onCanvasPointerDown);
       this.canvas.removeEventListener('contextmenu', this._onCanvasContextMenu);
     }
     window.removeEventListener('wheel', this._onWheel);
+    if (this.pointerObserver) {
+      this.scene?.onPointerObservable?.remove(this.pointerObserver);
+      this.pointerObserver = null;
+    }
     this.input?.dispose();
     this.player?.dispose();
     this.world?.dispose();
@@ -168,12 +173,33 @@ export class GameApp {
       onInventoryChange: () => this._onInventoryChanged(),
     });
 
+    if (!this.pointerObserver) {
+      this.pointerObserver = this.scene.onPointerObservable.add((pointerInfo) => {
+        console.log('[pointer]', {
+          pointerType: pointerInfo.type,
+          button: pointerInfo.event?.button,
+          locked: this.input?.isPointerLocked?.(),
+        });
+        if (!this.input?.isPointerLocked?.()) return;
+        if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) return;
+        const evt = pointerInfo.event;
+        if (evt.button === 0) {
+          console.log('[pointer] queue break');
+          this.blockInteraction?.queueBreak();
+        } else if (evt.button === 2) {
+          evt.preventDefault();
+          console.log('[pointer] queue place');
+          this.blockInteraction?.queuePlace();
+        }
+      });
+    }
+
+    this._seedStarterInventory();
     this._refreshInventoryUI();
     this._updateHudWorldInfo();
     this._updateFpsHud(0);
 
     if (this.canvas) {
-      this.canvas.addEventListener('pointerdown', this._onCanvasPointerDown);
       this.canvas.addEventListener('contextmenu', this._onCanvasContextMenu);
     }
 
@@ -268,6 +294,24 @@ export class GameApp {
     this._updateHudWorldInfo();
   }
 
+  _seedStarterInventory() {
+    if (!this.inventory) return;
+    const starter = [
+      { type: BLOCK_TYPES.grass, count: 32 },
+      { type: BLOCK_TYPES.dirt, count: 48 },
+      { type: BLOCK_TYPES.stone, count: 48 },
+      { type: BLOCK_TYPES.wood, count: 32 },
+      { type: BLOCK_TYPES.sand, count: 24 },
+      { type: BLOCK_TYPES.leaves, count: 16 },
+      { type: BLOCK_TYPES.gold, count: 12 },
+      { type: BLOCK_TYPES.diamond, count: 8 },
+      { type: BLOCK_TYPES.flower, count: 12 },
+    ];
+    starter.forEach(({ type, count }) => {
+      this.inventory.add(type, count);
+    });
+  }
+
   _refreshInventoryUI(direction = 1) {
     if (!this.inventory) return;
     this._ensureActiveHotbarIndex(direction);
@@ -313,13 +357,4 @@ export class GameApp {
     return true;
   }
 
-  _handlePointerDown(event) {
-    if (!this.input?.isPointerLocked?.()) return;
-    if (event.button === 0) {
-      this.blockInteraction?.queueBreak();
-    } else if (event.button === 2) {
-      event.preventDefault();
-      this.blockInteraction?.queuePlace();
-    }
-  }
 }

@@ -365,7 +365,12 @@ export class VoxelWorld {
     this._updateBlockTotals(previousType, blockType);
 
     this._buildChunkMeshes(chunk);
+    this._rebuildNeighborIfNeeded(cx, cz, lx, lz);
 
+    return true;
+  }
+
+  _rebuildNeighborIfNeeded(cx, cz, lx, lz) {
     const neighborSpecs = [];
     if (lx === 0) neighborSpecs.push([cx - 1, cz]);
     if (lx === CHUNK_SIZE - 1) neighborSpecs.push([cx + 1, cz]);
@@ -376,8 +381,6 @@ export class VoxelWorld {
       const neighbor = this.getChunk(ncx, ncz);
       if (neighbor) this._buildChunkMeshes(neighbor);
     }
-
-    return true;
   }
 
   getBlockAtWorld(x, y, z) {

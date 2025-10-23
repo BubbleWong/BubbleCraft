@@ -43,6 +43,9 @@ export class BlockInteraction {
 
     const pickInfo = this._pickSolidBlock();
     this.currentTarget = pickInfo;
+    if ((this.breakRequested || this.placeRequested) && !pickInfo) {
+      console.log('[blockInteraction] pickInfo missing');
+    }
     this._updateHud(pickInfo);
 
     if (!pickInfo) {
@@ -77,10 +80,16 @@ export class BlockInteraction {
   }
 
   _pickSolidBlock() {
-    if (!this.camera) return null;
-    const origin = this.camera.getAbsolutePosition?.() ?? this.camera.position.clone();
+    if (!this.camera || !this.player?.mesh) return null;
+    const meshPos = this.player.mesh.getAbsolutePosition?.() ?? this.player.mesh.position.clone();
+    const origin = meshPos.clone ? meshPos.clone() : new BABYLON.Vector3(meshPos.x, meshPos.y, meshPos.z);
+    origin.y += this.camera.position?.y ?? 0;
+    this.camera.computeWorldMatrix?.(true);
     const forwardDir = this.camera.getDirection(BABYLON.Axis.Z).normalize();
-    const forwardRay = BABYLON.Ray.CreateNewFromTo(origin, origin.add(forwardDir.scale(MAX_INTERACT_DISTANCE)));
+    const forwardRay = new BABYLON.Ray(origin, forwardDir, MAX_INTERACT_DISTANCE);
+    if (this.breakRequested || this.placeRequested) {
+      console.log('[blockInteraction] ray', { origin: origin.asArray?.() ?? origin, dir: forwardDir.asArray?.() ?? forwardDir });
+    }
     const pick = this.scene.pickWithRay(
       forwardRay,
       (mesh) => mesh?.metadata?.chunk && mesh.metadata.type === 'solid',
@@ -88,13 +97,16 @@ export class BlockInteraction {
     );
 
     if (!pick?.hit || !pick.pickedMesh?.metadata?.chunk) {
+      if (this.breakRequested || this.placeRequested) {
+        console.log('[blockInteraction] pick miss', pick);
+      }
       return null;
     }
 
     const chunk = pick.pickedMesh.metadata.chunk;
     const worldPoint = pick.pickedPoint;
     const normalVector = pick.getNormal(true, true);
-    const normal = normalVector ? normalVector.clone().normalize() : forwardDir.clone().scale(-1);
+    const normal = normalVector ? normalVector.clone().normalize() : forwardDir.clone().negate();
     const adjusted = worldPoint.subtract(normal.scale(EPSILON));
 
     const blockX = Math.floor(adjusted.x - chunk.origin.x);
@@ -132,6 +144,7 @@ export class BlockInteraction {
     const worldZ = chunk.origin.z + blockZ;
 
     const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, BLOCK_TYPES.air);
+    console.log('[blockInteraction] break attempt', { worldX, worldY, worldZ, blockType, changed });
     if (!changed) return;
 
     if (this.inventory) {
@@ -171,6 +184,7 @@ export class BlockInteraction {
     }
 
     const placed = this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);
+    console.log('[blockInteraction] place attempt', { worldX, worldY, worldZ, placeType, placed });
     if (!placed) return;
 
     const removed = this.inventory.removeFromSlot(this.activeSlot, 1);

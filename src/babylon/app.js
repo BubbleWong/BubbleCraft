@@ -1,15 +1,20 @@
 import { InputManager } from './input.js';
 import { PlayerController } from './player.js';
 import { VoxelWorld } from './world/index.js';
+import { HudManager } from './hud.js';
+import { BlockInteraction } from './blockInteraction.js';
+import { BLOCK_TYPES } from '../constants.js';
 
 export class GameApp {
   constructor({ canvas, overlay, crosshair, hud, fpsHud, loadingUi } = {}) {
     this.canvas = canvas;
     this.overlay = overlay ?? null;
     this.crosshair = crosshair ?? null;
-    this.hud = hud ?? null;
+    this.hudEl = hud ?? null;
     this.fpsHud = fpsHud ?? null;
     this.loadingUi = loadingUi ?? null;
+    this.inventoryEl = document.getElementById('inventory');
+    this.healthEl = document.getElementById('health');
 
     this.engine = null;
     this.scene = null;
@@ -17,6 +22,8 @@ export class GameApp {
     this.input = null;
     this.world = null;
     this.player = null;
+    this.hud = null;
+    this.blockInteraction = null;
 
     this._frameAccumulator = 0;
     this._started = false;
@@ -44,12 +51,13 @@ export class GameApp {
       canvas: this.canvas,
       overlay: this.overlay,
       crosshair: this.crosshair,
-      onPointerLockChanged: () => {
-        if (this.canvas && !document.pointerLockElement) {
+      onPointerLockChanged: (locked) => {
+        if (this.canvas && !locked) {
           this.canvas.style.cursor = 'auto';
         } else if (this.canvas) {
           this.canvas.style.cursor = 'none';
         }
+        this.hud?.setPointerLock(locked);
       },
     });
     await this._loadWorld();
@@ -101,9 +109,40 @@ export class GameApp {
     });
     this.player.setSpawnPoint(spawnPoint);
 
+    this.hud = new HudManager({
+      hudEl: this.hudEl,
+      inventoryEl: this.inventoryEl,
+      healthEl: this.healthEl,
+    });
+
     const orientation = this.input.getOrientation?.();
     if (orientation) {
       this.player.setOrientation(orientation);
+    }
+
+    const blockPalette = this._createBlockPalette();
+    this.hud.configureInventory(blockPalette);
+    this.hud.setActiveSlot(0);
+    this.hud.updateHealth(20, 20);
+    this.hud.setPointerLock(false);
+
+    this.blockInteraction = new BlockInteraction({
+      scene: this.scene,
+      world: this.world,
+      player: this.player,
+      camera: this.camera,
+      hud: this.hud,
+      blockPalette,
+    });
+    this.blockInteraction.setActiveSlot(0);
+
+    if (this.inventoryEl) {
+      this.inventoryEl.classList.toggle('hidden', false);
+    }
+
+    if (this.canvas) {
+      this.canvas.addEventListener('pointerdown', (event) => this._handlePointerDown(event));
+      this.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     }
 
     this._setLoadingState(false);
@@ -113,7 +152,14 @@ export class GameApp {
     this.scene.onBeforeRenderObservable.add(() => {
       const delta = this.scene.getEngine().getDeltaTime() * 0.001;
       if (this.player) {
-        this.player.update(delta);
+        const frameInput = this.input.poll();
+        if (frameInput.hotbarChanged) {
+          this.blockInteraction?.setActiveSlot(frameInput.hotbarIndex);
+          this.hud?.setActiveSlot(frameInput.hotbarIndex);
+        }
+
+        this.player.update(delta, frameInput);
+        this.blockInteraction?.update();
       }
 
       if (this.fpsHud) {
@@ -138,6 +184,30 @@ export class GameApp {
     if (!active) {
       if (barEl) barEl.style.width = '100%';
       if (percentEl) percentEl.textContent = '100%';
+    }
+  }
+
+  _createBlockPalette() {
+    return [
+      BLOCK_TYPES.grass,
+      BLOCK_TYPES.dirt,
+      BLOCK_TYPES.stone,
+      BLOCK_TYPES.sand,
+      BLOCK_TYPES.wood,
+      BLOCK_TYPES.leaves,
+      BLOCK_TYPES.gold,
+      BLOCK_TYPES.diamond,
+      BLOCK_TYPES.flower,
+    ];
+  }
+
+  _handlePointerDown(event) {
+    if (!this.input.isPointerLocked()) return;
+    if (event.button === 0) {
+      this.blockInteraction?.queueBreak();
+    } else if (event.button === 2) {
+      event.preventDefault();
+      this.blockInteraction?.queuePlace();
     }
   }
 }

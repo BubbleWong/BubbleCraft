@@ -9,6 +9,7 @@ const KEY_BINDINGS = {
 
 const LOOK_SENSITIVITY = (Math.PI / 180) * 0.12; // radians per pixel
 const MAX_PITCH = (Math.PI / 2) * 0.96;
+const HOTBAR_SLOT_COUNT = 9;
 
 export class InputManager {
   constructor({ canvas, overlay, crosshair, onPointerLockChanged } = {}) {
@@ -25,6 +26,8 @@ export class InputManager {
     this._pointerLocked = false;
     this._yaw = 0;
     this._pitch = 0;
+    this._hotbarIndex = 0;
+    this._hotbarDirty = true;
 
     this._handleKeyDown = (event) => this._onKeyDown(event);
     this._handleKeyUp = (event) => this._onKeyUp(event);
@@ -107,7 +110,19 @@ export class InputManager {
       jump,
       sprint,
       pointerLocked: this._pointerLocked,
+      hotbarIndex: this._hotbarIndex,
+      hotbarChanged: this._consumeHotbarDirty(),
     };
+  }
+
+  isPointerLocked() {
+    return this._pointerLocked;
+  }
+
+  _consumeHotbarDirty() {
+    const dirty = this._hotbarDirty;
+    this._hotbarDirty = false;
+    return dirty;
   }
 
   _onKeyDown(event) {
@@ -133,6 +148,14 @@ export class InputManager {
         KEY_BINDINGS.right.has(event.code)) {
       event.preventDefault();
     }
+
+    if (event.code.startsWith('Digit')) {
+      const digit = Number.parseInt(event.code.slice(-1), 10);
+      if (Number.isFinite(digit) && digit >= 1 && digit <= HOTBAR_SLOT_COUNT) {
+        this._setHotbarIndex(digit - 1);
+        event.preventDefault();
+      }
+    }
   }
 
   _onKeyUp(event) {
@@ -141,6 +164,10 @@ export class InputManager {
 
     if (KEY_BINDINGS.sprint.has(event.code)) {
       this._sprintActive = false;
+    }
+
+    if (event.code.startsWith('Digit')) {
+      event.preventDefault();
     }
   }
 
@@ -192,5 +219,11 @@ export class InputManager {
       this._updateAxes();
     }
     this._sprintActive = false;
+  }
+
+  _setHotbarIndex(index) {
+    if (index === this._hotbarIndex) return;
+    this._hotbarIndex = index;
+    this._hotbarDirty = true;
   }
 }

@@ -49,8 +49,8 @@ export class PlayerController {
     }
   }
 
-  update(deltaSeconds) {
-    const inputState = this.input.poll();
+  update(deltaSeconds, frameInput = null) {
+    const inputState = frameInput ?? this.input.poll();
     this._applyCameraOrientation(inputState.look);
     this._integrateMovement(deltaSeconds, inputState);
 

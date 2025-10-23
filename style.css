@@ -358,6 +358,17 @@ canvas#game {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
+.inventory__key {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
 .health {
   position: fixed;
   top: 1.25rem;

@@ -62,7 +62,11 @@ class Chunk {
   }
 
   set(lx, y, lz, type) {
-    this.blocks[this.index(lx, y, lz)] = type;
+    const idx = this.index(lx, y, lz);
+    const prev = this.blocks[idx];
+    if (prev === type) return false;
+    this.blocks[idx] = type;
+    return true;
   }
 
   generate() {
@@ -206,19 +210,25 @@ export class VoxelWorld {
     return chunk;
   }
 
+  getChunk(cx, cz) {
+    return this.chunks.get(chunkKey(cx, cz)) ?? null;
+  }
+
   _buildChunkMeshes(chunk) {
     const geometry = this._buildGeometry(chunk);
     if (!geometry) return;
 
     this._disposeChunkMeshes(chunk);
 
-    chunk.mesh = this._createMesh(`chunk-solid-${chunk.cx}-${chunk.cz}`, geometry.solid, this.solidMaterial, chunk.origin, {
+    chunk.mesh = this._createMesh(`chunk-solid-${chunk.cx}-${chunk.cz}`, geometry.solid, this.solidMaterial, chunk, {
       pickable: true,
+      type: 'solid',
     });
 
-    chunk.waterMesh = this._createMesh(`chunk-water-${chunk.cx}-${chunk.cz}`, geometry.water, this.waterMaterial, chunk.origin, {
+    chunk.waterMesh = this._createMesh(`chunk-water-${chunk.cx}-${chunk.cz}`, geometry.water, this.waterMaterial, chunk, {
       pickable: false,
       alphaIndex: 10,
+      type: 'water',
     });
 
   }
@@ -311,7 +321,7 @@ export class VoxelWorld {
     };
   }
 
-  _createMesh(name, geometry, material, origin, { pickable = true, alphaIndex = 0 } = {}) {
+  _createMesh(name, geometry, material, chunk, { pickable = true, alphaIndex = 0, type = 'solid' } = {}) {
     if (!geometry) return null;
     const mesh = new BABYLON.Mesh(name, this.scene);
     const vertexData = new BABYLON.VertexData();
@@ -320,12 +330,57 @@ export class VoxelWorld {
     vertexData.colors = geometry.colors;
     vertexData.indices = geometry.indices;
     vertexData.applyToMesh(mesh, true);
-    mesh.position.copyFrom(origin);
+    mesh.position.copyFrom(chunk.origin);
     mesh.material = material;
     mesh.isPickable = pickable;
     mesh.alphaIndex = alphaIndex;
     mesh.receiveShadows = true;
+    mesh.metadata = { chunk, type };
     return mesh;
+  }
+
+  setBlockAtWorld(x, y, z, blockType) {
+    if (y < 0 || y >= CHUNK_HEIGHT) return false;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return false;
+
+    const lx = Math.floor(x - chunk.origin.x);
+    const lz = Math.floor(z - chunk.origin.z);
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return false;
+
+    const updated = chunk.set(lx, y, lz, blockType);
+    if (!updated) return false;
+
+    this._buildChunkMeshes(chunk);
+
+    const neighborSpecs = [];
+    if (lx === 0) neighborSpecs.push([cx - 1, cz]);
+    if (lx === CHUNK_SIZE - 1) neighborSpecs.push([cx + 1, cz]);
+    if (lz === 0) neighborSpecs.push([cx, cz - 1]);
+    if (lz === CHUNK_SIZE - 1) neighborSpecs.push([cx, cz + 1]);
+
+    for (const [ncx, ncz] of neighborSpecs) {
+      const neighbor = this.getChunk(ncx, ncz);
+      if (neighbor) this._buildChunkMeshes(neighbor);
+    }
+
+    return true;
+  }
+
+  getBlockAtWorld(x, y, z) {
+    if (y < 0 || y >= CHUNK_HEIGHT) return BLOCK_TYPES.air;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return BLOCK_TYPES.air;
+    const lx = Math.floor(x - chunk.origin.x);
+    const lz = Math.floor(z - chunk.origin.z);
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) {
+      return BLOCK_TYPES.air;
+    }
+    return chunk.get(lx, y, lz);
   }
 
   _computeSpawnPoint() {

@@ -4,6 +4,9 @@ import {
   BLOCK_TYPES,
   BLOCK_COLORS,
   SEA_LEVEL,
+  FLOWER_COLOR_VARIANTS,
+  FLOWER_CENTER_COLOR,
+  FLOWER_STEM_COLOR,
 } from '../../constants.js';
 import { ImprovedNoise } from '../../vendor/ImprovedNoise.js';
 
@@ -37,6 +40,26 @@ function makeColor(baseColor, faceShade) {
     clamp01(baseColor[0] * faceShade),
     clamp01(baseColor[1] * faceShade),
     clamp01(baseColor[2] * faceShade),
+  ];
+}
+
+function mix(a, b, t) {
+  return a * (1 - t) + b * t;
+}
+
+function mixColorArrays(a, b, t) {
+  return [
+    mix(a[0], b[0], t),
+    mix(a[1], b[1], t),
+    mix(a[2], b[2], t),
+  ];
+}
+
+function adjustColor(color, amount) {
+  return [
+    clamp01(color[0] + amount),
+    clamp01(color[1] + amount),
+    clamp01(color[2] + amount),
   ];
 }
 
@@ -374,6 +397,12 @@ export class VoxelWorld {
           if (blockType === BLOCK_TYPES.air) continue;
 
           const target = blockType === BLOCK_TYPES.water ? water : solid;
+          const worldX = chunk.origin.x + lx;
+          const worldZ = chunk.origin.z + lz;
+          if (blockType === BLOCK_TYPES.flower) {
+            this._emitFlowerGeometry(target, chunk, lx, y, lz, worldX, y, worldZ);
+            continue;
+          }
           const baseColor = BLOCK_COLORS[blockType] ?? [1, 1, 1];
 
           for (const face of FACE_DEFS) {
@@ -504,6 +533,180 @@ export class VoxelWorld {
     return chunk.get(lx, y, lz);
   }
 
+  _rebuildNeighborIfNeeded(cx, cz, lx, lz) {
+    const neighborSpecs = [];
+    if (lx === 0) neighborSpecs.push([cx - 1, cz]);
+    if (lx === CHUNK_SIZE - 1) neighborSpecs.push([cx + 1, cz]);
+    if (lz === 0) neighborSpecs.push([cx, cz - 1]);
+    if (lz === CHUNK_SIZE - 1) neighborSpecs.push([cx, cz + 1]);
+
+    for (const [ncx, ncz] of neighborSpecs) {
+      const neighbor = this.getChunk(ncx, ncz);
+      if (neighbor) this._buildChunkMeshes(neighbor);
+    }
+  }
+
+  _emitDoubleSidedQuad(target, vertices, normal, colors) {
+    this._emitQuad(target, vertices, normal, colors);
+    const reversedVertices = [vertices[0], vertices[3], vertices[2], vertices[1]];
+    const reversedColors = [colors[0], colors[3], colors[2], colors[1]].map((c) => [...c]);
+    this._emitQuad(target, reversedVertices, [-normal[0], -normal[1], -normal[2]], reversedColors);
+  }
+
+  _emitQuad(target, vertices, normal, colors) {
+    const base = target.positions.length / 3;
+    for (let i = 0; i < 4; i += 1) {
+      const v = vertices[i];
+      target.positions.push(v[0], v[1], v[2]);
+      target.normals.push(normal[0], normal[1], normal[2]);
+      const c = colors[i];
+      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
+    }
+    target.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+
+  _emitDoubleSidedTri(target, v0, v1, v2, normal, colors) {
+    this._emitTri(target, v0, v1, v2, normal, colors);
+    this._emitTri(target, v0, v2, v1, [-normal[0], -normal[1], -normal[2]], colors.map((c) => [...c]));
+  }
+
+  _emitTri(target, v0, v1, v2, normal, colors) {
+    const base = target.positions.length / 3;
+    const verts = [v0, v1, v2];
+    for (let i = 0; i < 3; i += 1) {
+      const v = verts[i];
+      target.positions.push(v[0], v[1], v[2]);
+      target.normals.push(normal[0], normal[1], normal[2]);
+      const c = colors[i];
+      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
+    }
+    target.indices.push(base, base + 1, base + 2);
+  }
+
+  _computeQuadNormal(v0, v1, v2) {
+    const ax = v1[0] - v0[0];
+    const ay = v1[1] - v0[1];
+    const az = v1[2] - v0[2];
+    const bx = v2[0] - v0[0];
+    const by = v2[1] - v0[1];
+    const bz = v2[2] - v0[2];
+    const nx = ay * bz - az * by;
+    const ny = az * bx - ax * bz;
+    const nz = ax * by - ay * bx;
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    return [nx / length, ny / length, nz / length];
+  }
+
+  _colorWithAlpha(color, alpha) {
+    return [color[0], color[1], color[2], alpha];
+  }
+
+  _emitFlowerGeometry(target, chunk, lx, y, lz, worldX, worldY, worldZ) {
+    const centerX = lx + 0.5;
+    const centerZ = lz + 0.5;
+    const paletteIndex = Math.floor(this.random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
+    const paletteBase = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
+    const scale = 0.75 + this.random3D(worldX, worldY, worldZ, 689) * 0.25;
+    const stemHeight = 0.48 + this.random3D(worldX, worldY, worldZ, 690) * 0.25;
+    const bloomHeight = 0.25 + this.random3D(worldX, worldY, worldZ, 691) * 0.1;
+    const stemTopY = Math.min(y + stemHeight, CHUNK_HEIGHT - 0.1);
+    const petalBottomY = Math.min(stemTopY, y + stemHeight * 0.9);
+    const petalTopY = Math.min(y + 0.96, stemTopY + bloomHeight);
+
+    const stemRadius = 0.035 * scale;
+    const stemBottomColor = this._colorWithAlpha(adjustColor(FLOWER_STEM_COLOR, -0.12), 0.95);
+    const stemTopColor = this._colorWithAlpha(adjustColor(FLOWER_STEM_COLOR, 0.08), 0.95);
+
+    const stemPlaneX = [
+      [centerX - stemRadius, y, centerZ],
+      [centerX + stemRadius, y, centerZ],
+      [centerX + stemRadius, stemTopY, centerZ],
+      [centerX - stemRadius, stemTopY, centerZ],
+    ];
+    const stemColorsX = [
+      [...stemBottomColor],
+      [...stemBottomColor],
+      [...stemTopColor],
+      [...stemTopColor],
+    ];
+    this._emitDoubleSidedQuad(target, stemPlaneX, [0, 0, 1], stemColorsX);
+
+    const stemPlaneZ = [
+      [centerX, y, centerZ - stemRadius],
+      [centerX, y, centerZ + stemRadius],
+      [centerX, stemTopY, centerZ + stemRadius],
+      [centerX, stemTopY, centerZ - stemRadius],
+    ];
+    const stemColorsZ = [
+      [...stemBottomColor],
+      [...stemBottomColor],
+      [...stemTopColor],
+      [...stemTopColor],
+    ];
+    this._emitDoubleSidedQuad(target, stemPlaneZ, [1, 0, 0], stemColorsZ);
+
+    const petalAlpha = 0.96;
+    const petalBaseColor = this._colorWithAlpha(paletteBase.petalBase ?? [0.95, 0.66, 0.84], petalAlpha);
+    const petalEdgeColor = this._colorWithAlpha(paletteBase.petalEdge ?? [0.99, 0.93, 0.63], petalAlpha);
+    const segmentCount = 14;
+    const ringLevels = 3;
+    const radii = [0.32 * scale, 0.24 * scale, 0.12 * scale];
+    const heights = [petalBottomY, petalBottomY + (petalTopY - petalBottomY) * 0.55, petalTopY];
+
+    const rings = [];
+    for (let level = 0; level < ringLevels; level += 1) {
+      const ring = [];
+      for (let i = 0; i < segmentCount; i += 1) {
+        const t = (i / segmentCount) * Math.PI * 2;
+        const wobble = this.random3D(worldX, worldY, worldZ, 910 + level * 31 + i) * 0.06 * scale;
+        const radius = radii[level] + wobble;
+        ring.push([
+          centerX + Math.cos(t) * radius,
+          heights[level] + Math.sin(t * 2) * 0.03 * scale,
+          centerZ + Math.sin(t) * radius,
+        ]);
+      }
+      rings.push(ring);
+    }
+
+    for (let level = 0; level < ringLevels - 1; level += 1) {
+      const colorT0 = level / (ringLevels - 1);
+      const colorT1 = (level + 1) / (ringLevels - 1);
+      const colorLower = this._colorWithAlpha(mixColorArrays(petalBaseColor, petalEdgeColor, Math.pow(colorT0, 0.7)), petalAlpha);
+      const colorUpper = this._colorWithAlpha(mixColorArrays(petalBaseColor, petalEdgeColor, Math.pow(colorT1, 0.7)), petalAlpha);
+      for (let i = 0; i < segmentCount; i += 1) {
+        const next = (i + 1) % segmentCount;
+        const v0 = rings[level][i];
+        const v1 = rings[level][next];
+        const v2 = rings[level + 1][next];
+        const v3 = rings[level + 1][i];
+        const normal = this._computeQuadNormal(v0, v1, v2);
+        this._emitDoubleSidedQuad(target, [v0, v1, v2, v3], normal, [
+          [...colorLower],
+          [...colorLower],
+          [...colorUpper],
+          [...colorUpper],
+        ]);
+      }
+    }
+
+    const coreColor = this._colorWithAlpha(paletteBase.center ?? FLOWER_CENTER_COLOR, 0.95);
+    const coreRadius = 0.14 * scale;
+    const coreBottom = Math.min(petalTopY, stemTopY + 0.02);
+    const coreTop = Math.min(y + 0.96, coreBottom + 0.2);
+    const topCenter = [centerX, coreTop + 0.02 * scale, centerZ];
+    for (let i = 0; i < segmentCount; i += 1) {
+      const next = (i + 1) % segmentCount;
+      const v0 = rings[ringLevels - 1][i];
+      const v1 = rings[ringLevels - 1][next];
+      const normal = this._computeQuadNormal(v0, v1, topCenter);
+      this._emitDoubleSidedTri(target, v0, v1, topCenter, normal, [
+        this._colorWithAlpha(mixColorArrays(coreColor, petalEdgeColor, 0.2), 0.95),
+        this._colorWithAlpha(mixColorArrays(coreColor, petalEdgeColor, 0.2), 0.95),
+        this._colorWithAlpha(coreColor, 0.98),
+      ]);
+    }
+  }
   _computeSpawnPoint() {
     let best = null;
     const radius = Math.max(1, this.chunkRadius);

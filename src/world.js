@@ -1505,6 +1505,41 @@ export class World {
     return new THREE.Vector3(x + 0.5, y + 1.75, z + 0.5);
   }
 
+  getRandomRespawnPoint({ attempts = 48 } = {}) {
+    const chunkKeys = Array.from(this.chunks.keys());
+    if (chunkKeys.length === 0) {
+      return this.getSpawnPoint();
+    }
+
+    const maxAttempts = Math.max(1, attempts);
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const key = chunkKeys[Math.floor(Math.random() * chunkKeys.length)];
+      const chunk = this.chunks.get(key);
+      if (!chunk || chunk.disposed) continue;
+      const [cxStr, czStr] = key.split(',');
+      const cx = Number(cxStr);
+      const cz = Number(czStr);
+      if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+
+      const localX = Math.floor(Math.random() * CHUNK_SIZE);
+      const localZ = Math.floor(Math.random() * CHUNK_SIZE);
+      const worldX = cx * CHUNK_SIZE + localX;
+      const worldZ = cz * CHUNK_SIZE + localZ;
+      const surfaceY = this.getSurfaceHeightAt(worldX, worldZ);
+      if (!Number.isFinite(surfaceY) || surfaceY <= 0 || surfaceY >= CHUNK_HEIGHT - 2) continue;
+
+      const groundType = this.getBlock(worldX, surfaceY - 1, worldZ);
+      if (groundType === BLOCK_TYPES.water || groundType === BLOCK_TYPES.air) continue;
+      const feetBlock = this.getBlock(worldX, surfaceY, worldZ);
+      const headBlock = this.getBlock(worldX, surfaceY + 1, worldZ);
+      if (feetBlock !== BLOCK_TYPES.air || headBlock !== BLOCK_TYPES.air) continue;
+
+      return new THREE.Vector3(worldX + 0.5, surfaceY + 1.75, worldZ + 0.5);
+    }
+
+    return this.getSpawnPoint();
+  }
+
   getRaycastTarget(raycaster, { place = false } = {}) {
     const intersections = raycaster.intersectObjects(Array.from(this.chunkMeshes), false);
     if (intersections.length === 0) return null;

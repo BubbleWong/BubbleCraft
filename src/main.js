@@ -1162,6 +1162,11 @@ scene.add(sun);
 
 const world = new World(scene);
 const weatherSystem = new WeatherSystem({ scene, sun, hemisphere, fog: scene.fog, controls, camera });
+Object.defineProperty(window, 'setHealthPoints', {
+  value: setHealthPoints,
+  configurable: true,
+  writable: false,
+});
 
 const MAX_STEP_HEIGHT = 1.01;
 const MAX_JUMP_CLEARANCE = 0.1;
@@ -2498,23 +2503,60 @@ function heal(amount) {
   updateHealthUI();
 }
 
+function setHealthPoints(points) {
+  if (!Number.isFinite(points)) return clampHealth(health);
+  health = clampHealth(Math.round(points));
+  updateHealthUI();
+  if (health <= 0) handlePlayerDeath();
+  return health;
+}
+
 function handlePlayerDeath() {
   health = MAX_HEALTH;
   updateHealthUI();
+  const respawnPoint = world.getRandomRespawnPoint({ attempts: 64 });
   const player = controls.getObject();
-  player.position.copy(spawn);
-  player.position.y = Math.min(spawn.y, CHUNK_HEIGHT - 1);
-  velocity.set(0, 0, 0);
+  const intendedHeight = STAND_HEIGHT;
+  const groundHeight = world.getSurfaceHeightAt(respawnPoint.x, respawnPoint.z);
+  const blockX = Math.floor(respawnPoint.x);
+  const blockZ = Math.floor(respawnPoint.z);
+  let liftBlocks = 0;
+  const liftOptions = [2, 1];
+  for (const candidate of liftOptions) {
+    const footY = groundHeight + candidate;
+    if (footY >= CHUNK_HEIGHT) continue;
+    const headY = Math.floor(footY + intendedHeight - 0.001);
+    if (headY >= CHUNK_HEIGHT) continue;
+    if (
+      world.getBlock(blockX, footY, blockZ) === BLOCK_TYPES.air &&
+      world.getBlock(blockX, headY, blockZ) === BLOCK_TYPES.air
+    ) {
+      liftBlocks = candidate;
+      break;
+    }
+  }
+  const safeY = Math.min(groundHeight + intendedHeight + liftBlocks, CHUNK_HEIGHT - 1);
+  respawnPoint.y = safeY;
+  spawn.copy(respawnPoint);
+  player.position.set(respawnPoint.x, respawnPoint.y, respawnPoint.z);
+  spawn.set(player.position.x, player.position.y, player.position.z);
+  // Clear lateral motion but give a downward nudge so the player drops to ground.
+  velocity.set(0, -5, 0);
   footstepDistanceAccumulator = 0;
-  currentGroundHeight = world.getSurfaceHeightAt(spawn.x, spawn.z, spawn.y);
-  takeoffGroundHeight = currentGroundHeight;
-  maxClimbHeight = currentGroundHeight + MAX_STEP_HEIGHT;
-  takeoffFootHeight = Math.floor(currentGroundHeight);
+  currentGroundHeight = groundHeight;
+  takeoffGroundHeight = groundHeight;
+  maxClimbHeight = takeoffGroundHeight + MAX_STEP_HEIGHT;
+  takeoffFootHeight = Math.floor(groundHeight);
+  lastSafePosition.copy(player.position);
+  wasGroundedPrevious = true;
+  canJump = true;
   crouchToggleActive = false;
   keyState.crouchHold = false;
   isCrouching = false;
   playerHeight = STAND_HEIGHT;
   updateCrouchIndicator();
+  camera.getWorldDirection(cameraDirection);
+  world.updatePlayerPosition(player.position, cameraDirection);
 }
 
 function updateGamepadState() {

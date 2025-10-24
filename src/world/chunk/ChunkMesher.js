@@ -143,8 +143,8 @@ export class ChunkMesher {
     const random3D = this.random3D.bind(this);
     const random2D = this.random2D.bind(this);
 
-    const scale = 0.65 + random3D(worldX, worldY, worldZ, 689) * 0.25;
-    const heightScale = 0.85 + random3D(worldX, worldY, worldZ, 690) * 0.2;
+    const scale = 0.3 + random3D(worldX, worldY, worldZ, 689) * 0.6;
+    const heightScale = scale;
 
     const paletteIndex = Math.floor(random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
     const paletteVariant = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
@@ -222,19 +222,19 @@ export class ChunkMesher {
       for (let i = 0; i < leafCount; i += 1) {
         const heightFactor = 0.25 + random3D(worldX, worldY, worldZ, 870 + i) * 0.35;
         const baseY = bottomCenter[1] + height * heightFactor;
-        const leafLength = 0.22 + random3D(worldX, worldY, worldZ, 880 + i) * 0.14;
-        const leafWidth = 0.09 + random3D(worldX, worldY, worldZ, 890 + i) * 0.05;
+        const leafLength = (0.22 + random3D(worldX, worldY, worldZ, 880 + i) * 0.14) * scale;
+        const leafWidth = (0.09 + random3D(worldX, worldY, worldZ, 890 + i) * 0.05) * scale;
         const leafAngle = rotation + (i % 2 === 0 ? 0 : Math.PI / 2) + (random3D(worldX, worldY, worldZ, 900 + i) - 0.5) * 0.5;
         const dir = [Math.cos(leafAngle), 0, Math.sin(leafAngle)];
         const right = [-dir[2], 0, dir[0]];
         const baseCenter = [
-          bottomCenter[0] + dir[0] * 0.05,
+          bottomCenter[0] + dir[0] * 0.05 * scale,
           baseY,
-          bottomCenter[2] + dir[2] * 0.05,
+          bottomCenter[2] + dir[2] * 0.05 * scale,
         ];
         const tipCenter = [
           baseCenter[0] + dir[0] * leafLength,
-          baseY + 0.12 + random3D(worldX, worldY, worldZ, 910 + i) * 0.08,
+          baseY + (0.12 + random3D(worldX, worldY, worldZ, 910 + i) * 0.08) * scale,
           baseCenter[2] + dir[2] * leafLength,
         ];
         emitTaperedPanel(right, baseCenter, tipCenter, leafWidth * 0.5, leafWidth * 0.1, baseColor, tipColor, tipColor, 0.94);

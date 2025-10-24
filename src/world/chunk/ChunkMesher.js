@@ -3,12 +3,10 @@ import {
   CHUNK_HEIGHT,
   BLOCK_TYPES,
   BLOCK_COLORS,
-  SEA_LEVEL,
   FLOWER_COLOR_VARIANTS,
   FLOWER_CENTER_COLOR,
   FLOWER_STEM_COLOR,
 } from '../../constants.js';
-import { ImprovedNoise } from '../../vendor/ImprovedNoise.js';
 
 const FACE_DEFS = [
   { dir: [1, 0, 0], shade: 0.82, corners: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] },
@@ -21,18 +19,12 @@ const FACE_DEFS = [
 
 const TRIANGLE_ORDER = [0, 2, 1, 0, 3, 2];
 const TRANSPARENT_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
-const NON_COLLIDING_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower, BLOCK_TYPES.water]);
-const PASSABLE_BLOCKS = NON_COLLIDING_BLOCKS;
 
-const WORK_CHUNK_RADIUS = 5;
-const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
+const WHITE_COLOR = [1, 1, 1];
+const BLACK_COLOR = [0, 0, 0];
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
-}
-
-function chunkKey(cx, cz) {
-  return `${cx},${cz}`;
 }
 
 function makeColor(baseColor, faceShade) {
@@ -55,21 +47,12 @@ function mixColorArrays(a, b, t) {
   ];
 }
 
-const WHITE_COLOR = [1, 1, 1];
-const BLACK_COLOR = [0, 0, 0];
-
 function lightenColorArray(color, amount) {
   return mixColorArrays(color, WHITE_COLOR, clamp01(amount));
 }
 
 function darkenColorArray(color, amount) {
   return mixColorArrays(color, BLACK_COLOR, clamp01(amount));
-}
-
-function adjustRandomColorArray(color, randomFn, worldX, worldY, worldZ, salt, magnitude = 0.12) {
-  const offset = randomFn(worldX, worldY, worldZ, salt) * 2 - 1;
-  if (offset >= 0) return lightenColorArray(color, offset * magnitude);
-  return darkenColorArray(color, -offset * magnitude);
 }
 
 function adjustColor(color, amount) {
@@ -80,330 +63,20 @@ function adjustColor(color, amount) {
   ];
 }
 
-class Chunk {
-  constructor(world, cx, cz) {
-    this.world = world;
-    this.cx = cx;
-    this.cz = cz;
-    this.origin = new BABYLON.Vector3(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-    this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
-    this.mesh = null;
-    this.waterMesh = null;
-    this.counts = new Uint32Array(MAX_BLOCK_TYPE + 1);
-    this.generate();
-  }
-
-  index(lx, y, lz) {
-    return lx + CHUNK_SIZE * (lz + CHUNK_SIZE * y);
-  }
-
-  get(lx, y, lz) {
-    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT) {
-      return BLOCK_TYPES.air;
-    }
-    return this.blocks[this.index(lx, y, lz)];
-  }
-
-  set(lx, y, lz, type) {
-    const idx = this.index(lx, y, lz);
-    const prev = this.blocks[idx];
-    if (prev === type) return false;
-    this.blocks[idx] = type;
-    if (this.counts[prev] > 0) this.counts[prev] -= 1;
-    this.counts[type] += 1;
-    return true;
-  }
-
-  generate() {
-    this.counts.fill(0);
-    for (let lx = 0; lx < CHUNK_SIZE; lx += 1) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz += 1) {
-        const worldX = this.origin.x + lx;
-        const worldZ = this.origin.z + lz;
-        const terrainHeight = this.world.sampleTerrainHeight(worldX, worldZ);
-        const surfaceBlock = terrainHeight <= SEA_LEVEL + 1 ? BLOCK_TYPES.sand : BLOCK_TYPES.grass;
-        const top = Math.max(terrainHeight, SEA_LEVEL);
-
-        for (let y = 0; y <= top; y += 1) {
-          let block = BLOCK_TYPES.stone;
-          if (y === terrainHeight) {
-            block = surfaceBlock;
-          } else if (y > terrainHeight - 3) {
-            block = BLOCK_TYPES.dirt;
-          }
-          this.set(lx, y, lz, block);
-        }
-
-        if (terrainHeight < SEA_LEVEL) {
-          for (let y = terrainHeight + 1; y <= SEA_LEVEL; y += 1) {
-            this.set(lx, y, lz, BLOCK_TYPES.water);
-          }
-        }
-
-        if (surfaceBlock === BLOCK_TYPES.grass && terrainHeight + 1 < CHUNK_HEIGHT) {
-          if (this._maybePlaceTree(lx, terrainHeight, lz, worldX, worldZ)) {
-            continue;
-          }
-          const flowerChance = this.world.random2D(worldX, worldZ, 97);
-          if (flowerChance > 0.88) {
-            this.set(lx, terrainHeight + 1, lz, BLOCK_TYPES.flower);
-          }
-        }
-      }
-    }
-  }
-
-  _maybePlaceTree(lx, groundY, lz, worldX, worldZ) {
-    const treeChance = this.world.random2D(worldX, worldZ, 37);
-    if (treeChance <= 0.82) return false;
-    const heightRand = this.world.random2D(worldX, worldZ, 53);
-    const treeHeight = 4 + Math.floor(heightRand * 3);
-    if (!this._canPlaceTree(lx, groundY, lz, treeHeight)) return false;
-    this._placeTree(lx, groundY, lz, treeHeight, worldX, worldZ);
-    return true;
-  }
-
-  _canPlaceTree(lx, groundY, lz, height) {
-    const radius = 2;
-    if (
-      lx < radius ||
-      lx >= CHUNK_SIZE - radius ||
-      lz < radius ||
-      lz >= CHUNK_SIZE - radius ||
-      groundY + height + 2 >= CHUNK_HEIGHT
-    ) {
-      return false;
-    }
-
-    for (let y = groundY + 1; y <= groundY + height + 2; y += 1) {
-      for (let dx = -radius; dx <= radius; dx += 1) {
-        for (let dz = -radius; dz <= radius; dz += 1) {
-          const check = this.get(lx + dx, y, lz + dz);
-          if (!PASSABLE_BLOCKS.has(check)) return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  _placeTree(lx, groundY, lz, height, worldX, worldZ) {
-    for (let i = 1; i <= height; i += 1) {
-      this.set(lx, groundY + i, lz, BLOCK_TYPES.wood);
-    }
-
-    const canopyTop = groundY + height + 2;
-    for (let y = groundY + height - 1; y <= canopyTop; y += 1) {
-      const layerRadius = Math.max(1, canopyTop - y);
-      for (let dx = -layerRadius; dx <= layerRadius; dx += 1) {
-        for (let dz = -layerRadius; dz <= layerRadius; dz += 1) {
-          const dist = Math.abs(dx) + Math.abs(dz);
-          if (dist > layerRadius + 1) continue;
-          const targetX = lx + dx;
-          const targetY = y;
-          const targetZ = lz + dz;
-          if (
-            targetX < 0 ||
-            targetX >= CHUNK_SIZE ||
-            targetZ < 0 ||
-            targetZ >= CHUNK_SIZE ||
-            targetY >= CHUNK_HEIGHT
-          ) {
-            continue;
-          }
-          if (dx === 0 && dz === 0 && targetY <= groundY + height) continue;
-          if (PASSABLE_BLOCKS.has(this.get(targetX, targetY, targetZ))) {
-            const leafNoise = this.world.random3D(worldX + dx, targetY, worldZ + dz, 113);
-            if (leafNoise > 0.2) {
-              this.set(targetX, targetY, targetZ, BLOCK_TYPES.leaves);
-            }
-          }
-        }
-      }
-    }
-
-    const offsets = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ];
-    for (const [dx, dz] of offsets) {
-      const fx = lx + dx;
-      const fz = lz + dz;
-      const flowerY = groundY + 1;
-      if (
-        fx < 0 ||
-        fx >= CHUNK_SIZE ||
-        fz < 0 ||
-        fz >= CHUNK_SIZE ||
-        flowerY >= CHUNK_HEIGHT
-      ) {
-        continue;
-      }
-      if (this.get(fx, groundY, fz) === BLOCK_TYPES.grass && PASSABLE_BLOCKS.has(this.get(fx, flowerY, fz))) {
-        const chance = this.world.random2D(worldX + dx * 3, worldZ + dz * 3, 127);
-        if (chance > 0.65) {
-          this.set(fx, flowerY, fz, BLOCK_TYPES.flower);
-        }
-      }
-    }
-  }
+function adjustRandomColorArray(color, randomFn, worldX, worldY, worldZ, salt, magnitude = 0.12) {
+  const offset = randomFn(worldX, worldY, worldZ, salt) * 2 - 1;
+  if (offset >= 0) return lightenColorArray(color, offset * magnitude);
+  return darkenColorArray(color, -offset * magnitude);
 }
 
-export class VoxelWorld {
-  constructor(scene, { chunkRadius = WORK_CHUNK_RADIUS } = {}) {
-    this.scene = scene;
-    this.chunkRadius = Math.max(1, Math.floor(chunkRadius));
-    this.noise = new ImprovedNoise();
-    this.seed = Math.random() * 10_000;
-    this.chunks = new Map();
-    this.chunkList = [];
-    this.solidMaterial = new BABYLON.StandardMaterial('vox-solid', scene);
-    this.solidMaterial.useVertexColor = true;
-    this.solidMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-    this.solidMaterial.useVertexAlpha = true;
-
-    this.waterMaterial = new BABYLON.StandardMaterial('vox-water', scene);
-    this.waterMaterial.useVertexColor = true;
-    this.waterMaterial.alpha = 0.6;
-    this.waterMaterial.backFaceCulling = false;
-    this.waterMaterial.needDepthPrePass = true;
-    this.waterMaterial.useVertexAlpha = true;
-    this.waterMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
-
-    this._spawnPoint = new BABYLON.Vector3(0, SEA_LEVEL + 4, 0);
-    this.blockTotals = new Array(MAX_BLOCK_TYPE + 1).fill(0);
+export class ChunkMesher {
+  constructor({ getNeighborBlock, random2D, random3D }) {
+    this.getNeighborBlock = getNeighborBlock;
+    this.random2D = random2D;
+    this.random3D = random3D;
   }
 
-  async generate(onProgress = null) {
-    const total = (this.chunkRadius * 2 + 1) ** 2;
-    let processed = 0;
-
-    for (let cz = -this.chunkRadius; cz <= this.chunkRadius; cz += 1) {
-      for (let cx = -this.chunkRadius; cx <= this.chunkRadius; cx += 1) {
-        const chunk = this._ensureChunk(cx, cz);
-        this.chunkList.push(chunk);
-        this._buildChunkMeshes(chunk);
-        processed += 1;
-        if (typeof onProgress === 'function') {
-          onProgress(processed / total);
-        }
-        if (processed % 4 === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }
-    }
-
-    this._spawnPoint = this._computeSpawnPoint();
-    return { spawnPoint: this.getSpawnPoint() };
-  }
-
-  dispose() {
-    for (const chunk of this.chunkList) {
-      this._disposeChunk(chunk);
-    }
-    this.chunkList.length = 0;
-    this.chunks.clear();
-  }
-
-  getSpawnPoint() {
-    return this._spawnPoint.clone();
-  }
-
-  sampleTerrainHeight(x, z) {
-    const base = 24;
-    let amplitude = 16;
-    let frequency = 0.035;
-    let value = 0;
-
-    for (let octave = 0; octave < 4; octave += 1) {
-      const noiseValue = this.noise.noise(x * frequency, this.seed + octave * 54.321, z * frequency);
-      value += noiseValue * amplitude;
-      amplitude *= 0.5;
-      frequency *= 1.9;
-    }
-
-    const height = base + value;
-    return Math.max(2, Math.min(CHUNK_HEIGHT - 2, Math.floor(height)));
-  }
-
-  random2D(x, z, salt = 0) {
-    const s = Math.sin((x * 12_989.8 + z * 78_233.1 + (this.seed + salt) * 0.125) * 0.5);
-    return s - Math.floor(s);
-  }
-
-  random3D(x, y, z, salt = 0) {
-    const s = Math.sin((x * 12_989.8 + y * 78_233.1 + z * 37_513.7 + (this.seed + salt) * 0.223) * 0.5);
-    return s - Math.floor(s);
-  }
-
-  getSurfaceHeight(x, z) {
-    const cx = Math.floor(x / CHUNK_SIZE);
-    const cz = Math.floor(z / CHUNK_SIZE);
-    const chunk = this.chunks.get(chunkKey(cx, cz));
-    if (!chunk) return SEA_LEVEL + 3;
-    const lx = Math.floor(x - chunk.origin.x);
-    const lz = Math.floor(z - chunk.origin.z);
-    for (let y = CHUNK_HEIGHT - 1; y >= 0; y -= 1) {
-      const type = chunk.get(lx, y, lz);
-      if (!NON_COLLIDING_BLOCKS.has(type)) {
-        return y + 1;
-      }
-    }
-    return SEA_LEVEL + 3;
-  }
-
-  _ensureChunk(cx, cz) {
-    const key = chunkKey(cx, cz);
-    let chunk = this.chunks.get(key);
-    if (!chunk) {
-      chunk = new Chunk(this, cx, cz);
-      this.chunks.set(key, chunk);
-      this._applyChunkCounts(chunk, 1);
-    }
-    return chunk;
-  }
-
-  getChunk(cx, cz) {
-    return this.chunks.get(chunkKey(cx, cz)) ?? null;
-  }
-
-  _buildChunkMeshes(chunk) {
-    const geometry = this._buildGeometry(chunk);
-    if (!geometry) return;
-
-    this._disposeChunkMeshes(chunk);
-
-    chunk.mesh = this._createMesh(`chunk-solid-${chunk.cx}-${chunk.cz}`, geometry.solid, this.solidMaterial, chunk, {
-      pickable: true,
-      type: 'solid',
-    });
-
-    chunk.waterMesh = this._createMesh(`chunk-water-${chunk.cx}-${chunk.cz}`, geometry.water, this.waterMaterial, chunk, {
-      pickable: false,
-      alphaIndex: 10,
-      type: 'water',
-    });
-
-  }
-
-  _disposeChunkMeshes(chunk) {
-    if (chunk.mesh) {
-      chunk.mesh.dispose(false, true);
-      chunk.mesh = null;
-    }
-    if (chunk.waterMesh) {
-      chunk.waterMesh.dispose(false, true);
-      chunk.waterMesh = null;
-    }
-  }
-
-  _disposeChunk(chunk) {
-    this._applyChunkCounts(chunk, -1);
-    this._disposeChunkMeshes(chunk);
-  }
-
-  _buildGeometry(chunk) {
+  buildGeometry(chunk) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], colors: [], indices: [] };
 
@@ -423,8 +96,9 @@ export class VoxelWorld {
           const baseColor = BLOCK_COLORS[blockType] ?? [1, 1, 1];
 
           for (const face of FACE_DEFS) {
-            const neighbor = this._getNeighborBlock(chunk, lx, y, lz, face.dir);
-            const transparentNeighbor = TRANSPARENT_BLOCKS.has(neighbor) || (neighbor === BLOCK_TYPES.water && blockType !== BLOCK_TYPES.water);
+            const neighbor = this.getNeighborBlock(chunk, lx, y, lz, face.dir);
+            const transparentNeighbor = TRANSPARENT_BLOCKS.has(neighbor) ||
+              (neighbor === BLOCK_TYPES.water && blockType !== BLOCK_TYPES.water);
             if (!transparentNeighbor) continue;
 
             const shade = blockType === BLOCK_TYPES.water ? 0.95 : face.shade;
@@ -453,25 +127,6 @@ export class VoxelWorld {
     };
   }
 
-  _getNeighborBlock(chunk, lx, y, lz, dir) {
-    const nx = lx + dir[0];
-    const ny = y + dir[1];
-    const nz = lz + dir[2];
-    if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < CHUNK_HEIGHT) {
-      return chunk.get(nx, ny, nz);
-    }
-
-    const worldX = chunk.origin.x + nx;
-    const worldZ = chunk.origin.z + nz;
-    const cx = Math.floor(worldX / CHUNK_SIZE);
-    const cz = Math.floor(worldZ / CHUNK_SIZE);
-    const neighborChunk = this.chunks.get(chunkKey(cx, cz));
-    if (!neighborChunk) return BLOCK_TYPES.air;
-    const localX = (worldX % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-    const localZ = (worldZ % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-    return neighborChunk.get(localX, ny, localZ);
-  }
-
   _finalizeGeometry(data) {
     if (data.positions.length === 0) return null;
     return {
@@ -482,159 +137,17 @@ export class VoxelWorld {
     };
   }
 
-  _createMesh(name, geometry, material, chunk, { pickable = true, alphaIndex = 0, type = 'solid' } = {}) {
-    if (!geometry) return null;
-    const mesh = new BABYLON.Mesh(name, this.scene);
-    const vertexData = new BABYLON.VertexData();
-    vertexData.positions = geometry.positions;
-    vertexData.normals = geometry.normals;
-    vertexData.colors = geometry.colors;
-    vertexData.indices = geometry.indices;
-    vertexData.applyToMesh(mesh, true);
-    mesh.position.copyFrom(chunk.origin);
-    mesh.material = material;
-    mesh.isPickable = pickable;
-    mesh.alphaIndex = alphaIndex;
-    mesh.receiveShadows = true;
-    mesh.metadata = { chunk, type };
-    return mesh;
-  }
-
-  setBlockAtWorld(x, y, z, blockType) {
-    if (y < 0 || y >= CHUNK_HEIGHT) return false;
-    const cx = Math.floor(x / CHUNK_SIZE);
-    const cz = Math.floor(z / CHUNK_SIZE);
-    const chunk = this.getChunk(cx, cz);
-    if (!chunk) return false;
-
-    const lx = Math.floor(x - chunk.origin.x);
-    const lz = Math.floor(z - chunk.origin.z);
-    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return false;
-
-    const previousType = chunk.get(lx, y, lz);
-    const updated = chunk.set(lx, y, lz, blockType);
-    if (!updated) return false;
-
-    this._updateBlockTotals(previousType, blockType);
-
-    this._buildChunkMeshes(chunk);
-    this._rebuildNeighborIfNeeded(cx, cz, lx, lz);
-
-    return true;
-  }
-
-  _rebuildNeighborIfNeeded(cx, cz, lx, lz) {
-    const neighborSpecs = [];
-    if (lx === 0) neighborSpecs.push([cx - 1, cz]);
-    if (lx === CHUNK_SIZE - 1) neighborSpecs.push([cx + 1, cz]);
-    if (lz === 0) neighborSpecs.push([cx, cz - 1]);
-    if (lz === CHUNK_SIZE - 1) neighborSpecs.push([cx, cz + 1]);
-
-    for (const [ncx, ncz] of neighborSpecs) {
-      const neighbor = this.getChunk(ncx, ncz);
-      if (neighbor) this._buildChunkMeshes(neighbor);
-    }
-  }
-
-  getBlockAtWorld(x, y, z) {
-    if (y < 0 || y >= CHUNK_HEIGHT) return BLOCK_TYPES.air;
-    const cx = Math.floor(x / CHUNK_SIZE);
-    const cz = Math.floor(z / CHUNK_SIZE);
-    const chunk = this.getChunk(cx, cz);
-    if (!chunk) return BLOCK_TYPES.air;
-    const lx = Math.floor(x - chunk.origin.x);
-    const lz = Math.floor(z - chunk.origin.z);
-    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) {
-      return BLOCK_TYPES.air;
-    }
-    return chunk.get(lx, y, lz);
-  }
-
-  _rebuildNeighborIfNeeded(cx, cz, lx, lz) {
-    const neighborSpecs = [];
-    if (lx === 0) neighborSpecs.push([cx - 1, cz]);
-    if (lx === CHUNK_SIZE - 1) neighborSpecs.push([cx + 1, cz]);
-    if (lz === 0) neighborSpecs.push([cx, cz - 1]);
-    if (lz === CHUNK_SIZE - 1) neighborSpecs.push([cx, cz + 1]);
-
-    for (const [ncx, ncz] of neighborSpecs) {
-      const neighbor = this.getChunk(ncx, ncz);
-      if (neighbor) this._buildChunkMeshes(neighbor);
-    }
-  }
-
-  _emitDoubleSidedQuad(target, vertices, normal, colors) {
-    this._emitQuad(target, vertices, normal, colors);
-    const reversedVertices = [vertices[0], vertices[3], vertices[2], vertices[1]];
-    const reversedColors = [colors[0], colors[3], colors[2], colors[1]].map((c) => [...c]);
-    this._emitQuad(target, reversedVertices, [-normal[0], -normal[1], -normal[2]], reversedColors);
-  }
-
-  _emitQuad(target, vertices, normal, colors) {
-    const base = target.positions.length / 3;
-    for (let i = 0; i < 4; i += 1) {
-      const v = vertices[i];
-      target.positions.push(v[0], v[1], v[2]);
-      target.normals.push(normal[0], normal[1], normal[2]);
-      const c = colors[i];
-      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
-    }
-    target.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  }
-
-  _emitDoubleSidedTri(target, v0, v1, v2, normal, colors) {
-    this._emitTri(target, v0, v1, v2, normal, colors);
-    this._emitTri(target, v0, v2, v1, [-normal[0], -normal[1], -normal[2]], colors.map((c) => [...c]));
-  }
-
-  _emitTri(target, v0, v1, v2, normal, colors) {
-    const base = target.positions.length / 3;
-    const verts = [v0, v1, v2];
-    for (let i = 0; i < 3; i += 1) {
-      const v = verts[i];
-      target.positions.push(v[0], v[1], v[2]);
-      target.normals.push(normal[0], normal[1], normal[2]);
-      const c = colors[i];
-      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
-    }
-    target.indices.push(base, base + 1, base + 2);
-  }
-
-  _computeQuadNormal(v0, v1, v2) {
-    const ax = v1[0] - v0[0];
-    const ay = v1[1] - v0[1];
-    const az = v1[2] - v0[2];
-    const bx = v2[0] - v0[0];
-    const by = v2[1] - v0[1];
-    const bz = v2[2] - v0[2];
-    const nx = ay * bz - az * by;
-    const ny = az * bx - ax * bz;
-    const nz = ax * by - ay * bx;
-    const length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-    return [nx / length, ny / length, nz / length];
-  }
-
-  _colorWithAlpha(color, alpha) {
-    return [color[0], color[1], color[2], alpha];
-  }
-
   _emitFlowerGeometry(target, chunk, lx, y, lz, worldX, worldY, worldZ) {
     const centerX = lx + 0.5;
     const centerZ = lz + 0.5;
-    const paletteIndex = Math.floor(this.random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
-    const paletteVariant = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0] ?? {
-      petalBase: [0.95, 0.66, 0.84],
-      petalEdge: [0.99, 0.93, 0.63],
-      petalCenter: [0.67, 0.13, 0.39],
-      center: FLOWER_CENTER_COLOR,
-    };
-
     const random3D = this.random3D.bind(this);
     const random2D = this.random2D.bind(this);
 
     const scale = 0.65 + random3D(worldX, worldY, worldZ, 689) * 0.25;
     const heightScale = 0.85 + random3D(worldX, worldY, worldZ, 690) * 0.2;
 
+    const paletteIndex = Math.floor(random2D(worldX, worldZ, 731) * FLOWER_COLOR_VARIANTS.length) % FLOWER_COLOR_VARIANTS.length;
+    const paletteVariant = FLOWER_COLOR_VARIANTS[paletteIndex] ?? FLOWER_COLOR_VARIANTS[0];
     const palette = {
       petalBase: adjustRandomColorArray(paletteVariant.petalBase ?? [0.95, 0.66, 0.84], random3D, worldX, worldY, worldZ, 701, 0.18),
       petalEdge: adjustRandomColorArray(paletteVariant.petalEdge ?? [0.99, 0.93, 0.63], random3D, worldX, worldY, worldZ, 703, 0.18),
@@ -673,7 +186,6 @@ export class VoxelWorld {
     const vecAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
     const vecSub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     const vecScale = (v, s) => [v[0] * s, v[1] * s, v[2] * s];
-
     const makeColor = (color, alpha = 0.96) => this._colorWithAlpha(color, alpha);
 
     const emitTaperedPanel = (right, bottomCenter, topCenter, bottomHalfWidth, topHalfWidth, bottomColor, topLeftColor, topRightColor, alpha = 0.96) => {
@@ -882,7 +394,7 @@ export class VoxelWorld {
       const coreTop = Math.min(bloomTop + 0.04 * scale, CHUNK_HEIGHT - 0.01);
       const coreRotation = random2D(worldX, worldZ, 906) * Math.PI * 2;
       const coreCenter = [stemTopCenter[0], (coreBottom + coreTop) * 0.5, stemTopCenter[2]];
-      emitBloomCore(coreCenter, coreBottom, coreTop, coreRadius, coreRotation, coreColor);
+      emitBloomCore(coreCenter, coreBottom, coreTop, Math.min(0.18 * scale, 0.16), coreRotation, coreColor);
     };
 
     const emitFanVariant = () => {
@@ -973,47 +485,75 @@ export class VoxelWorld {
     }
     emitFanVariant();
   }
-  _computeSpawnPoint() {
-    let best = null;
-    const radius = Math.max(1, this.chunkRadius);
-    for (let z = -radius; z <= radius; z += 1) {
-      for (let x = -radius; x <= radius; x += 1) {
-        const worldX = x * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-        const worldZ = z * CHUNK_SIZE + CHUNK_SIZE * 0.5;
-        const surfaceY = this.getSurfaceHeight(worldX, worldZ);
-        if (!best || surfaceY > best.y) {
-          best = { x: worldX, y: surfaceY, z: worldZ };
-        }
-      }
-    }
-    if (!best) return new BABYLON.Vector3(0.5, SEA_LEVEL + 4, 0.5);
-    return new BABYLON.Vector3(best.x, best.y + 1.8, best.z);
+
+  _emitTaperedPetal(target, right, bottomCenter, topCenter, bottomWidth, topWidth, bottomColor, topColor) {
+    const verts = [
+      [bottomCenter[0] - right[0] * bottomWidth, bottomCenter[1], bottomCenter[2] - right[2] * bottomWidth],
+      [topCenter[0] - right[0] * topWidth, topCenter[1], topCenter[2] - right[2] * topWidth],
+      [topCenter[0] + right[0] * topWidth, topCenter[1], topCenter[2] + right[2] * topWidth],
+      [bottomCenter[0] + right[0] * bottomWidth, bottomCenter[1], bottomCenter[2] + right[2] * bottomWidth],
+    ];
+    const normal = this._computeQuadNormal(verts[0], verts[1], verts[2]);
+    this._emitDoubleSidedQuad(target, verts, normal, [
+      [...bottomColor],
+      [...topColor],
+      [...topColor],
+      [...bottomColor],
+    ]);
   }
 
-  getBlockTotals() {
-    return this.blockTotals;
+  _emitDoubleSidedQuad(target, vertices, normal, colors) {
+    this._emitQuad(target, vertices, normal, colors);
+    const reversedVertices = [vertices[0], vertices[3], vertices[2], vertices[1]];
+    const reversedColors = [colors[0], colors[3], colors[2], colors[1]].map((c) => [...c]);
+    this._emitQuad(target, reversedVertices, [-normal[0], -normal[1], -normal[2]], reversedColors);
   }
 
-  _applyChunkCounts(chunk, delta) {
-    if (!chunk?.counts) return;
-    for (let i = 0; i < chunk.counts.length; i += 1) {
-      const amount = chunk.counts[i];
-      if (!amount) continue;
-      const current = this.blockTotals[i] ?? 0;
-      const next = current + delta * amount;
-      this.blockTotals[i] = next < 0 ? 0 : next;
+  _emitQuad(target, vertices, normal, colors) {
+    const base = target.positions.length / 3;
+    for (let i = 0; i < 4; i += 1) {
+      const v = vertices[i];
+      target.positions.push(v[0], v[1], v[2]);
+      target.normals.push(normal[0], normal[1], normal[2]);
+      const c = colors[i];
+      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
     }
+    target.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
 
-  _updateBlockTotals(previousType, nextType) {
-    if (Number.isInteger(previousType) && previousType >= 0) {
-      const current = this.blockTotals[previousType] ?? 0;
-      const next = current - 1;
-      this.blockTotals[previousType] = next < 0 ? 0 : next;
+  _emitDoubleSidedTri(target, v0, v1, v2, normal, colors) {
+    this._emitTri(target, v0, v1, v2, normal, colors);
+    this._emitTri(target, v0, v2, v1, [-normal[0], -normal[1], -normal[2]], colors.map((c) => [...c]));
+  }
+
+  _emitTri(target, v0, v1, v2, normal, colors) {
+    const base = target.positions.length / 3;
+    const verts = [v0, v1, v2];
+    for (let i = 0; i < 3; i += 1) {
+      const v = verts[i];
+      target.positions.push(v[0], v[1], v[2]);
+      target.normals.push(normal[0], normal[1], normal[2]);
+      const c = colors[i];
+      target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
     }
-    if (Number.isInteger(nextType) && nextType >= 0) {
-      const current = this.blockTotals[nextType] ?? 0;
-      this.blockTotals[nextType] = current + 1;
-    }
+    target.indices.push(base, base + 1, base + 2);
+  }
+
+  _colorWithAlpha(color, alpha) {
+    return [color[0], color[1], color[2], alpha];
+  }
+
+  _computeQuadNormal(v0, v1, v2) {
+    const ax = v1[0] - v0[0];
+    const ay = v1[1] - v0[1];
+    const az = v1[2] - v0[2];
+    const bx = v2[0] - v0[0];
+    const by = v2[1] - v0[1];
+    const bz = v2[2] - v0[2];
+    const nx = ay * bz - az * by;
+    const ny = az * bx - ax * bz;
+    const nz = ax * by - ay * bx;
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    return [nx / length, ny / length, nz / length];
   }
 }

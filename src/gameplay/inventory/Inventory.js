@@ -1,4 +1,4 @@
-import { BLOCK_TYPES } from '../constants.js';
+import { BLOCK_TYPES } from '../../constants.js';
 
 export const HOTBAR_SLOT_COUNT = 9;
 export const MAX_STACK_SIZE = 64;

@@ -7,11 +7,13 @@ const CAPSULE_HEIGHT = 1.78;
 const CAPSULE_RADIUS = 0.42;
 
 export class PlayerController {
-  constructor({ scene, world, camera, input }) {
+  constructor({ scene, world, camera, input, context = null }) {
     this.scene = scene;
     this.world = world;
     this.camera = camera;
     this.input = input;
+    this.context = context;
+    this.eventBus = context?.eventBus ?? null;
 
     this.walkSpeed = DEFAULT_WALK_SPEED;
     this.sprintMultiplier = DEFAULT_SPRINT_MULTIPLIER;
@@ -62,6 +64,7 @@ export class PlayerController {
   respawn() {
     this.mesh.position.copyFrom(this._spawnPoint);
     this._velocity.setAll(0);
+    this.eventBus?.emit('player:respawn', { position: this.mesh.position.clone(), player: this });
   }
 
   dispose() {

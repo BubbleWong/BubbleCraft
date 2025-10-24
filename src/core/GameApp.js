@@ -1,12 +1,15 @@
-import { InputManager } from './input.js';
-import { PlayerController } from './player.js';
-import { VoxelWorld } from './world/index.js';
-import { HudManager } from './hud.js';
-import { BlockInteraction } from './blockInteraction.js';
-import { Inventory, HOTBAR_SLOT_COUNT } from './inventory.js';
-import { WeatherSystem } from './weatherSystem.js';
-const { PointerEventTypes } = BABYLON;
+import { InputManager } from '../input/InputManager.js';
+import { PlayerController } from '../gameplay/entities/player/PlayerController.js';
+import { VoxelWorld } from '../world/VoxelWorld.js';
+import { HudManager } from '../ui/HudManager.js';
+import { BlockInteraction } from '../gameplay/systems/BlockInteraction.js';
+import { Inventory, HOTBAR_SLOT_COUNT } from '../gameplay/inventory/Inventory.js';
+import { WeatherSystem } from '../gameplay/systems/WeatherSystem.js';
+import { GameContext } from './GameContext.js';
+import { EventBus } from './services/EventBus.js';
 import { BLOCK_TYPES } from '../constants.js';
+
+const { PointerEventTypes } = BABYLON;
 
 const HUD_UPDATE_INTERVAL = 0.2;
 const FPS_UPDATE_INTERVAL = 0.5;
@@ -26,6 +29,8 @@ export class GameApp {
     this.engine = null;
     this.scene = null;
     this.camera = null;
+    this.context = null;
+    this.eventBus = new EventBus();
     this.input = null;
     this.world = null;
     this.player = null;
@@ -36,6 +41,7 @@ export class GameApp {
     this.hemisphereLight = null;
     this.sunLight = null;
     this.pointerObserver = null;
+    this._eventDisposers = [];
 
     this.maxHealth = 20;
     this.currentHealth = 20;
@@ -70,6 +76,14 @@ export class GameApp {
     this.camera.fov = BABYLON.Tools.ToRadians(70);
     this.camera.inputs.clear();
 
+    this.context = new GameContext({
+      engine: this.engine,
+      scene: this.scene,
+      camera: this.camera,
+      eventBus: this.eventBus,
+    });
+    this.context.registerService('eventBus', this.eventBus);
+
     this._createEnvironment();
 
     this.input = new InputManager({
@@ -85,6 +99,7 @@ export class GameApp {
         this.hud?.setPointerLock(locked);
       },
     });
+    this.context.registerService('input', this.input);
 
     await this._loadWorld();
 
@@ -111,11 +126,13 @@ export class GameApp {
       this.scene?.onPointerObservable?.remove(this.pointerObserver);
       this.pointerObserver = null;
     }
+    this._clearEventBindings();
     this.input?.dispose();
     this.player?.dispose();
     this.world?.dispose();
     this.scene?.dispose();
     this.engine?.dispose();
+    this.context?.dispose();
     this._started = false;
   }
 
@@ -128,30 +145,42 @@ export class GameApp {
     this.sunLight.intensity = 1.05;
 
     this.weatherSystem = new WeatherSystem({ scene: this.scene, sun: this.sunLight, hemisphere: this.hemisphereLight });
+    this.context?.registerService('weather', this.weatherSystem);
+    this.context?.registerService('lighting', {
+      hemisphere: this.hemisphereLight,
+      sun: this.sunLight,
+    });
   }
 
   async _loadWorld() {
     this._setLoadingState(true, 'Generating terrain…', 0);
-    this.world = new VoxelWorld(this.scene, { chunkRadius: 5 });
+    this.world = new VoxelWorld(this.context, { chunkRadius: 5 });
+    this.context.registerService('world', this.world);
     const { spawnPoint } = await this.world.generate((progress) => {
       this._setLoadingState(true, 'Generating terrain…', Math.round(progress * 80));
     });
+    this.eventBus.emit('world:ready', { world: this.world });
 
     this._setLoadingState(true, 'Spawning player…', 90);
     this.player = new PlayerController({
+      context: this.context,
       scene: this.scene,
       world: this.world,
       camera: this.camera,
       input: this.input,
     });
     this.player.setSpawnPoint(spawnPoint);
+    this.context.registerService('player', this.player);
+    this.eventBus.emit('player:spawn', { player: this.player, spawnPoint });
 
     this.inventory = new Inventory(HOTBAR_SLOT_COUNT);
+    this.context.registerService('inventory', this.inventory);
     this.hud = new HudManager({
       hudEl: this.hudEl,
       inventoryEl: this.inventoryEl,
       healthEl: this.healthEl,
     });
+    this.context.registerService('hud', this.hud);
     this.hud.bindInventory(this.inventory);
     this.currentHealth = this.maxHealth;
     this.hud.updateHealth(this.currentHealth, this.maxHealth);
@@ -171,7 +200,10 @@ export class GameApp {
       hud: this.hud,
       inventory: this.inventory,
       onInventoryChange: () => this._onInventoryChanged(),
+      context: this.context,
+      eventBus: this.eventBus,
     });
+    this.context.registerService('blockInteraction', this.blockInteraction);
 
     if (!this.pointerObserver) {
       this.pointerObserver = this.scene.onPointerObservable.add((pointerInfo) => {
@@ -189,7 +221,7 @@ export class GameApp {
         } else if (evt.button === 2) {
           evt.preventDefault();
           console.log('[pointer] queue place');
-          this.blockInteraction?.queuePlace();
+      this.blockInteraction?.queuePlace();
         }
       });
     }
@@ -198,12 +230,44 @@ export class GameApp {
     this._refreshInventoryUI();
     this._updateHudWorldInfo();
     this._updateFpsHud(0);
+    this._registerEventBindings();
 
     if (this.canvas) {
       this.canvas.addEventListener('contextmenu', this._onCanvasContextMenu);
     }
 
     this._setLoadingState(false);
+  }
+
+  _registerEventBindings() {
+    this._clearEventBindings();
+    if (!this.eventBus) return;
+    const disposers = [];
+    disposers.push(
+      this.eventBus.on('world:blockChange', () => this._updateHudWorldInfo()),
+      this.eventBus.on('block:break', () => this._onInventoryChanged()),
+      this.eventBus.on('block:place', () => this._onInventoryChanged()),
+      this.eventBus.on('inventory:changed', () => this._onInventoryChanged()),
+      this.eventBus.on('player:respawn', () => {
+        this.currentHealth = this.maxHealth;
+        this.hud?.updateHealth(this.currentHealth, this.maxHealth);
+        this._updateHudWorldInfo();
+      }),
+    );
+    this._eventDisposers.push(...disposers.filter(Boolean));
+  }
+
+  _clearEventBindings() {
+    if (!this._eventDisposers) return;
+    for (const dispose of this._eventDisposers) {
+      try {
+        dispose?.();
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to dispose event listener', error);
+      }
+    }
+    this._eventDisposers.length = 0;
   }
 
   _registerUpdateLoop() {

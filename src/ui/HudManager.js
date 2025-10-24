@@ -1,5 +1,5 @@
 import { BLOCK_TYPES, BLOCK_TYPE_LABELS, BLOCK_COLORS, FLOWER_UI_COLOR } from '../constants.js';
-import { WEATHER_LABELS, TIME_OF_DAY_LABELS } from './weatherSystem.js';
+import { WEATHER_LABELS, TIME_OF_DAY_LABELS } from '../gameplay/systems/WeatherSystem.js';
 
 const HEART_PER_POINT = 2;
 

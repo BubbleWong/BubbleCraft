@@ -1,4 +1,4 @@
-import { GameApp } from './babylon/app.js';
+import { GameApp } from './core/GameApp.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');

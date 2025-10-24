@@ -1,10 +1,10 @@
-import { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES } from '../constants.js';
+import { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES } from '../../constants.js';
 
 const MAX_INTERACT_DISTANCE = 6.5;
 const EPSILON = 1e-3;
 
 export class BlockInteraction {
-  constructor({ scene, world, player, camera, hud, inventory, onInventoryChange }) {
+  constructor({ scene, world, player, camera, hud, inventory, onInventoryChange, context = null, eventBus = null }) {
     this.scene = scene;
     this.world = world;
     this.player = player;
@@ -12,6 +12,8 @@ export class BlockInteraction {
     this.hud = hud;
     this.inventory = inventory;
     this.onInventoryChange = onInventoryChange ?? (() => {});
+    this.context = context;
+    this.eventBus = eventBus ?? context?.eventBus ?? null;
 
     this.activeSlot = 0;
     this.currentTarget = null;
@@ -153,6 +155,12 @@ export class BlockInteraction {
         this.onInventoryChange();
       }
     }
+    this.eventBus?.emit('block:break', {
+      position: { x: worldX, y: worldY, z: worldZ },
+      type: blockType,
+      player: this.player,
+    });
+    this.eventBus?.emit('inventory:changed', { inventory: this.inventory });
   }
 
   _placeBlock(target) {
@@ -190,6 +198,14 @@ export class BlockInteraction {
     const removed = this.inventory.removeFromSlot(this.activeSlot, 1);
     if (removed > 0) {
       this.onInventoryChange();
+    }
+    this.eventBus?.emit('block:place', {
+      position: { x: worldX, y: worldY, z: worldZ },
+      type: placeType,
+      player: this.player,
+    });
+    if (removed > 0) {
+      this.eventBus?.emit('inventory:changed', { inventory: this.inventory });
     }
   }
 }

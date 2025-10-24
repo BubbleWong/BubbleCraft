@@ -256,6 +256,56 @@ export class ChunkMesher {
       }
     };
 
+    const emitFlatDisc = (center, radius, thickness, color, alpha = 0.96, segments = 12) => {
+      const discBottom = center[1] - thickness * 0.5;
+      const discTop = center[1] + thickness * 0.5;
+      const bottomRing = [];
+      const topRing = [];
+      for (let i = 0; i < segments; i += 1) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = center[0] + Math.cos(angle) * radius;
+        const z = center[2] + Math.sin(angle) * radius;
+        bottomRing.push([x, discBottom, z]);
+        topRing.push([x, discTop, z]);
+      }
+      for (let i = 0; i < segments; i += 1) {
+        const next = (i + 1) % segments;
+        const v0 = bottomRing[i];
+        const v1 = bottomRing[next];
+        const v2 = topRing[next];
+        const v3 = topRing[i];
+        const normal = this._computeQuadNormal(v0, v1, v2);
+        this._emitDoubleSidedQuad(target, [v0, v1, v2, v3], normal, [
+          makeColor(color, alpha),
+          makeColor(color, alpha),
+          makeColor(lightenColorArray(color, 0.1), alpha),
+          makeColor(lightenColorArray(color, 0.1), alpha),
+        ]);
+      }
+
+      const bottomCenter = [center[0], discBottom, center[2]];
+      const topCenter = [center[0], discTop, center[2]];
+      for (let i = 0; i < segments; i += 1) {
+        const next = (i + 1) % segments;
+        const vb0 = bottomRing[i];
+        const vb1 = bottomRing[next];
+        const vt0 = topRing[i];
+        const vt1 = topRing[next];
+        const normalBottom = this._computeQuadNormal(vb0, vb1, bottomCenter);
+        const normalTop = this._computeQuadNormal(vt0, topCenter, vt1);
+        this._emitDoubleSidedTri(target, vb0, vb1, bottomCenter, normalBottom, [
+          makeColor(color, alpha),
+          makeColor(color, alpha),
+          makeColor(color, alpha),
+        ]);
+        this._emitDoubleSidedTri(target, vt0, vt1, topCenter, normalTop, [
+          makeColor(lightenColorArray(color, 0.08), alpha),
+          makeColor(lightenColorArray(color, 0.08), alpha),
+          makeColor(lightenColorArray(color, 0.08), alpha),
+        ]);
+      }
+    };
+
     const emitPetalLayer = (stemCenter, bottomY, topY, baseRadius, petalCount, rotation, paletteColors, salt) => {
       for (let i = 0; i < petalCount; i += 1) {
         const angle = rotation + (i / petalCount) * Math.PI * 2;
@@ -319,12 +369,9 @@ export class ChunkMesher {
         }
       }
 
-      const coreRadius = Math.min(0.22, (0.12 + random3D(worldX, worldY, worldZ, 765) * 0.05) * scale);
-      const coreBottom = Math.max(bloomBottom, bloomTop - Math.max(0.12, bloomExtra * 0.6));
-      const coreTop = bloomTop;
-      const coreRotation = rotation + Math.PI / 6;
-      const coreCenter = [stemTopCenter[0], (coreBottom + coreTop) * 0.5, stemTopCenter[2]];
-      emitBloomCore(coreCenter, coreBottom, coreTop, coreRadius, coreRotation, palette.center ?? FLOWER_CENTER_COLOR);
+      const coreRadius = Math.min(0.16, (0.1 + random3D(worldX, worldY, worldZ, 765) * 0.04) * scale);
+      const coreCenter = [stemTopCenter[0], bloomTop - Math.min(0.02 * scale, 0.015), stemTopCenter[2]];
+      emitFlatDisc(coreCenter, coreRadius, Math.min(0.035 * scale, 0.03), palette.center ?? FLOWER_CENTER_COLOR, 0.96, 10);
     };
 
     const emitLayeredVariant = () => {
@@ -389,12 +436,9 @@ export class ChunkMesher {
         ]);
       }
 
-      const coreRadius = Math.min(0.2 * scale, 0.18);
-      const coreBottom = Math.max(bloomBottom, bloomTop - Math.max(0.12, bloomExtra * 0.55));
-      const coreTop = Math.min(bloomTop + 0.04 * scale, CHUNK_HEIGHT - 0.01);
-      const coreRotation = random2D(worldX, worldZ, 906) * Math.PI * 2;
-      const coreCenter = [stemTopCenter[0], (coreBottom + coreTop) * 0.5, stemTopCenter[2]];
-      emitBloomCore(coreCenter, coreBottom, coreTop, Math.min(0.18 * scale, 0.16), coreRotation, coreColor);
+      const coreRadius = Math.min(0.14 * scale, 0.12);
+      const coreCenter = [stemTopCenter[0], bloomTop - Math.min(0.018 * scale, 0.014), stemTopCenter[2]];
+      emitFlatDisc(coreCenter, coreRadius, Math.min(0.03 * scale, 0.026), mixColorArrays(coreColor, palette.petalEdge, 0.35), 0.94, 12);
     };
 
     const emitFanVariant = () => {
@@ -465,12 +509,9 @@ export class ChunkMesher {
         ]);
       }
 
-      const coreRadius = Math.min(0.18 * scale, 0.15);
-      const coreBottom = Math.max(bloomBottom, bloomTop - Math.max(0.1, bloomExtra * 0.55));
-      const coreTop = bloomTop;
-      const coreRotation = random2D(worldX, worldZ, 907) * Math.PI * 2;
-      const coreCenter = [stemTopCenter[0], (coreBottom + coreTop) * 0.5, stemTopCenter[2]];
-      emitBloomCore(coreCenter, coreBottom, coreTop, coreRadius, coreRotation, palette.center ?? FLOWER_CENTER_COLOR);
+      const coreRadius = Math.min(0.12 * scale, 0.1);
+      const coreCenter = [stemTopCenter[0], bloomTop - Math.min(0.015 * scale, 0.012), stemTopCenter[2]];
+      emitFlatDisc(coreCenter, coreRadius, Math.min(0.026 * scale, 0.022), mixColorArrays(palette.center ?? FLOWER_CENTER_COLOR, palette.petalEdge, 0.25), 0.92, 14);
     };
 
     const styleSeed = random3D(worldX, worldY, worldZ, 905);

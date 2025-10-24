@@ -436,9 +436,7 @@ export class ChunkMesher {
         ]);
       }
 
-      const coreRadius = Math.min(0.14 * scale, 0.12);
-      const coreCenter = [stemTopCenter[0], bloomTop - Math.min(0.018 * scale, 0.014), stemTopCenter[2]];
-      emitFlatDisc(coreCenter, coreRadius, Math.min(0.03 * scale, 0.026), mixColorArrays(coreColor, palette.petalEdge, 0.35), 0.94, 12);
+      // 層疊花型保持光滑中心，不生成額外花蕊
     };
 
     const emitFanVariant = () => {

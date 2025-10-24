@@ -221,20 +221,25 @@ export class ChunkMesher {
       const tipColor = lightenColorArray(FLOWER_STEM_COLOR, 0.15);
       for (let i = 0; i < leafCount; i += 1) {
         const heightFactor = 0.25 + random3D(worldX, worldY, worldZ, 870 + i) * 0.35;
-        const baseY = bottomCenter[1] + height * heightFactor;
+        const anchor = [
+          bottomCenter[0] + (stemTop[0] - bottomCenter[0]) * heightFactor,
+          bottomCenter[1] + (stemTop[1] - bottomCenter[1]) * heightFactor,
+          bottomCenter[2] + (stemTop[2] - bottomCenter[2]) * heightFactor,
+        ];
         const leafLength = (0.22 + random3D(worldX, worldY, worldZ, 880 + i) * 0.14) * scale;
         const leafWidth = (0.09 + random3D(worldX, worldY, worldZ, 890 + i) * 0.05) * scale;
         const leafAngle = rotation + (i % 2 === 0 ? 0 : Math.PI / 2) + (random3D(worldX, worldY, worldZ, 900 + i) - 0.5) * 0.5;
         const dir = [Math.cos(leafAngle), 0, Math.sin(leafAngle)];
         const right = [-dir[2], 0, dir[0]];
+        const baseOffset = 0.05 * scale;
         const baseCenter = [
-          bottomCenter[0] + dir[0] * 0.05 * scale,
-          baseY,
-          bottomCenter[2] + dir[2] * 0.05 * scale,
+          anchor[0] + dir[0] * baseOffset,
+          anchor[1],
+          anchor[2] + dir[2] * baseOffset,
         ];
         const tipCenter = [
           baseCenter[0] + dir[0] * leafLength,
-          baseY + (0.12 + random3D(worldX, worldY, worldZ, 910 + i) * 0.08) * scale,
+          anchor[1] + (0.12 + random3D(worldX, worldY, worldZ, 910 + i) * 0.08) * scale,
           baseCenter[2] + dir[2] * leafLength,
         ];
         emitTaperedPanel(right, baseCenter, tipCenter, leafWidth * 0.5, leafWidth * 0.1, baseColor, tipColor, tipColor, 0.94);

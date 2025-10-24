@@ -70,15 +70,16 @@ function adjustRandomColorArray(color, randomFn, worldX, worldY, worldZ, salt, m
 }
 
 export class ChunkMesher {
-  constructor({ getNeighborBlock, random2D, random3D }) {
+  constructor({ getNeighborBlock, random2D, random3D, atlas }) {
     this.getNeighborBlock = getNeighborBlock;
     this.random2D = random2D;
     this.random3D = random3D;
+    this.atlas = atlas;
   }
 
   buildGeometry(chunk) {
-    const solid = { positions: [], normals: [], colors: [], indices: [] };
-    const water = { positions: [], normals: [], colors: [], indices: [] };
+    const solid = { positions: [], normals: [], colors: [], uvs: [], indices: [] };
+    const water = { positions: [], normals: [], colors: [], uvs: [], indices: [] };
 
     for (let y = 0; y < CHUNK_HEIGHT; y += 1) {
       for (let lz = 0; lz < CHUNK_SIZE; lz += 1) {
@@ -95,7 +96,8 @@ export class ChunkMesher {
           }
           const baseColor = BLOCK_COLORS[blockType] ?? [1, 1, 1];
 
-          for (const face of FACE_DEFS) {
+          for (let faceIndex = 0; faceIndex < FACE_DEFS.length; faceIndex += 1) {
+            const face = FACE_DEFS[faceIndex];
             const neighbor = this.getNeighborBlock(chunk, lx, y, lz, face.dir);
             const transparentNeighbor = TRANSPARENT_BLOCKS.has(neighbor) ||
               (neighbor === BLOCK_TYPES.water && blockType !== BLOCK_TYPES.water);
@@ -105,12 +107,19 @@ export class ChunkMesher {
             const color = makeColor(baseColor, shade);
             const alpha = blockType === BLOCK_TYPES.water ? 0.68 : 1.0;
             const vertexBase = target.positions.length / 3;
+            const faceUV = this.atlas?.getBlockFaceUV(blockType, faceIndex);
 
             for (let i = 0; i < 4; i += 1) {
               const corner = face.corners[i];
               target.positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
               target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
               target.colors.push(color[0], color[1], color[2], alpha);
+              if (faceUV) {
+                target.uvs.push(faceUV[i * 2], faceUV[i * 2 + 1]);
+              } else {
+                const [u, v] = this._getNeutralUV();
+                target.uvs.push(u, v);
+              }
             }
 
             for (let i = 0; i < TRIANGLE_ORDER.length; i += 1) {
@@ -133,6 +142,7 @@ export class ChunkMesher {
       positions: new Float32Array(data.positions),
       normals: new Float32Array(data.normals),
       colors: new Float32Array(data.colors),
+      uvs: new Float32Array(data.uvs),
       indices: new Uint32Array(data.indices),
     };
   }
@@ -546,45 +556,70 @@ export class ChunkMesher {
     ]);
   }
 
-  _emitDoubleSidedQuad(target, vertices, normal, colors) {
-    this._emitQuad(target, vertices, normal, colors);
+  _emitDoubleSidedQuad(target, vertices, normal, colors, uvs = null) {
+    this._emitQuad(target, vertices, normal, colors, uvs);
     const reversedVertices = [vertices[0], vertices[3], vertices[2], vertices[1]];
     const reversedColors = [colors[0], colors[3], colors[2], colors[1]].map((c) => [...c]);
-    this._emitQuad(target, reversedVertices, [-normal[0], -normal[1], -normal[2]], reversedColors);
+    let reversedUvs = null;
+    if (uvs) {
+      reversedUvs = [
+        uvs[0], uvs[1],
+        uvs[6], uvs[7],
+        uvs[4], uvs[5],
+        uvs[2], uvs[3],
+      ];
+    }
+    this._emitQuad(target, reversedVertices, [-normal[0], -normal[1], -normal[2]], reversedColors, reversedUvs);
   }
 
-  _emitQuad(target, vertices, normal, colors) {
+  _emitQuad(target, vertices, normal, colors, uvs = null) {
     const base = target.positions.length / 3;
+    const neutral = uvs ? null : this._getNeutralUV();
     for (let i = 0; i < 4; i += 1) {
       const v = vertices[i];
       target.positions.push(v[0], v[1], v[2]);
       target.normals.push(normal[0], normal[1], normal[2]);
       const c = colors[i];
       target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
+      if (uvs) {
+        target.uvs.push(uvs[i * 2], uvs[i * 2 + 1]);
+      } else {
+        target.uvs.push(neutral[0], neutral[1]);
+      }
     }
     target.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
 
-  _emitDoubleSidedTri(target, v0, v1, v2, normal, colors) {
-    this._emitTri(target, v0, v1, v2, normal, colors);
-    this._emitTri(target, v0, v2, v1, [-normal[0], -normal[1], -normal[2]], colors.map((c) => [...c]));
+  _emitDoubleSidedTri(target, v0, v1, v2, normal, colors, uvs = null) {
+    this._emitTri(target, v0, v1, v2, normal, colors, uvs);
+    this._emitTri(target, v0, v2, v1, [-normal[0], -normal[1], -normal[2]], colors.map((c) => [...c]), uvs);
   }
 
-  _emitTri(target, v0, v1, v2, normal, colors) {
+  _emitTri(target, v0, v1, v2, normal, colors, uvs = null) {
     const base = target.positions.length / 3;
     const verts = [v0, v1, v2];
+    const neutral = uvs ? null : this._getNeutralUV();
     for (let i = 0; i < 3; i += 1) {
       const v = verts[i];
       target.positions.push(v[0], v[1], v[2]);
       target.normals.push(normal[0], normal[1], normal[2]);
       const c = colors[i];
       target.colors.push(c[0], c[1], c[2], c[3] ?? 1);
+      if (uvs) {
+        target.uvs.push(uvs[i * 2], uvs[i * 2 + 1]);
+      } else {
+        target.uvs.push(neutral[0], neutral[1]);
+      }
     }
     target.indices.push(base, base + 1, base + 2);
   }
 
   _colorWithAlpha(color, alpha) {
     return [color[0], color[1], color[2], alpha];
+  }
+
+  _getNeutralUV() {
+    return this.atlas?.getNeutralUV() ?? [0.5, 0.5];
   }
 
   _computeQuadNormal(v0, v1, v2) {

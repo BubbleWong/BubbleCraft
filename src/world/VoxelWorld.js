@@ -8,6 +8,7 @@ import { Chunk } from './chunk/Chunk.js';
 import { ChunkMesher } from './chunk/ChunkMesher.js';
 import { TerrainGenerator } from './generation/TerrainGenerator.js';
 import { ImprovedNoise } from './generation/ImprovedNoise.js';
+import { BlockAtlas } from './textures/BlockAtlas.js';
 
 const WORK_CHUNK_RADIUS = 5;
 const MAX_BLOCK_TYPE = Math.max(...Object.values(BLOCK_TYPES));
@@ -34,10 +35,12 @@ export class VoxelWorld {
     this.blockTotals = new Array(MAX_BLOCK_TYPE + 1).fill(0);
     this.maxBlockType = MAX_BLOCK_TYPE;
     this.generator = new TerrainGenerator(this);
+    this.blockAtlas = this.scene ? new BlockAtlas(this.scene) : null;
     this.chunkMesher = new ChunkMesher({
       getNeighborBlock: (chunk, lx, y, lz, dir) => this._getNeighborBlock(chunk, lx, y, lz, dir),
       random2D: this.random2D.bind(this),
       random3D: this.random3D.bind(this),
+      atlas: this.blockAtlas,
     });
 
     this._spawnPoint = new BABYLON.Vector3(0, SEA_LEVEL + 4, 0);
@@ -47,6 +50,13 @@ export class VoxelWorld {
       this.solidMaterial.useVertexColor = true;
       this.solidMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
       this.solidMaterial.useVertexAlpha = true;
+      if (this.blockAtlas?.texture) {
+        this.solidMaterial.diffuseTexture = this.blockAtlas.texture;
+        this.solidMaterial.diffuseTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+        this.solidMaterial.diffuseTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+        this.solidMaterial.diffuseTexture.hasAlpha = false;
+      }
+      this.solidMaterial.backFaceCulling = true;
     }
 
     this.waterMaterial = this.scene ? new BABYLON.StandardMaterial('vox-water', this.scene) : null;
@@ -57,6 +67,11 @@ export class VoxelWorld {
       this.waterMaterial.needDepthPrePass = true;
       this.waterMaterial.useVertexAlpha = true;
       this.waterMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+      if (this.blockAtlas?.texture) {
+        this.waterMaterial.diffuseTexture = this.blockAtlas.texture;
+        this.waterMaterial.diffuseTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+        this.waterMaterial.diffuseTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+      }
     }
   }
 
@@ -230,6 +245,7 @@ export class VoxelWorld {
     vertexData.positions = geometry.positions;
     vertexData.normals = geometry.normals;
     vertexData.colors = geometry.colors;
+    vertexData.uvs = geometry.uvs;
     vertexData.indices = geometry.indices;
     vertexData.applyToMesh(mesh, true);
     mesh.position.copyFrom(chunk.origin);

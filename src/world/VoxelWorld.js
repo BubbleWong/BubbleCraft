@@ -317,6 +317,35 @@ export class VoxelWorld {
   }
 
   _computeSpawnPoint() {
+    const maxInteriorRadius = Math.max(2, Math.min(this.chunkRadius - 1, Math.floor(this.chunkRadius * 0.4)));
+    const span = maxInteriorRadius * CHUNK_SIZE;
+    const attempts = Math.max(48, maxInteriorRadius * maxInteriorRadius * 4);
+    let best = null;
+
+    for (let i = 0; i < attempts; i += 1) {
+      const worldX = Math.floor((Math.random() * 2 - 1) * span);
+      const worldZ = Math.floor((Math.random() * 2 - 1) * span);
+      const surfaceY = Math.floor(this.getSurfaceHeight(worldX, worldZ));
+      const groundType = this.getBlockAtWorld(worldX, surfaceY - 1, worldZ);
+      const headSpace = this.getBlockAtWorld(worldX, surfaceY, worldZ);
+      if (groundType === BLOCK_TYPES.water || headSpace !== BLOCK_TYPES.air) continue;
+      const distance = Math.abs(worldX) + Math.abs(worldZ);
+      if (!best || surfaceY > best.surfaceY || (surfaceY === best.surfaceY && distance < best.distance)) {
+        best = {
+          x: worldX + 0.5,
+          y: surfaceY,
+          z: worldZ + 0.5,
+          surfaceY,
+          distance,
+        };
+      }
+    }
+
+    if (!best) return this._computeSpawnPointFallback();
+    return new BABYLON.Vector3(best.x, best.y + 1.8, best.z);
+  }
+
+  _computeSpawnPointFallback() {
     let best = null;
     const radius = Math.max(1, this.chunkRadius);
     for (let z = -radius; z <= radius; z += 1) {

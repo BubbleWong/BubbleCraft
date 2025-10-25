@@ -3,6 +3,8 @@ import {
   CHUNK_HEIGHT,
   BLOCK_TYPES,
   SEA_LEVEL,
+  EXTENDED_WORLD_RADIUS,
+  MAX_CHUNK_LOADS_PER_TICK,
 } from '../constants.js';
 import { Chunk } from './chunk/Chunk.js';
 import { ChunkMesher } from './chunk/ChunkMesher.js';
@@ -23,15 +25,21 @@ function sleep(ms = 0) {
 }
 
 export class VoxelWorld {
-  constructor(context, { chunkRadius = WORK_CHUNK_RADIUS } = {}) {
+  constructor(context, { chunkRadius = WORK_CHUNK_RADIUS, maxRadius = EXTENDED_WORLD_RADIUS } = {}) {
     this.context = context;
     this.eventBus = context?.eventBus ?? null;
     this.scene = context?.scene ?? null;
     this.chunkRadius = Math.max(1, Math.floor(chunkRadius));
+    this.maxChunkRadius = Math.max(this.chunkRadius, Math.floor(maxRadius));
     this.noise = new ImprovedNoise();
     this.seed = Math.random() * 10_000;
     this.chunks = new Map();
     this.chunkList = [];
+    this.generatedRadius = 0;
+    this._queuedRadius = 0;
+    this._generationQueue = [];
+    this._queuedChunkKeys = new Set();
+    this._pendingRingLoads = new Map();
     this.blockTotals = new Array(MAX_BLOCK_TYPE + 1).fill(0);
     this.maxBlockType = MAX_BLOCK_TYPE;
     this.generator = new TerrainGenerator(this);
@@ -95,6 +103,8 @@ export class VoxelWorld {
     }
 
     this._spawnPoint = this._computeSpawnPoint();
+    this.generatedRadius = this.chunkRadius;
+    this._queuedRadius = this.chunkRadius;
     return { spawnPoint: this.getSpawnPoint() };
   }
 
@@ -104,6 +114,11 @@ export class VoxelWorld {
     }
     this.chunkList.length = 0;
     this.chunks.clear();
+    this._generationQueue.length = 0;
+    this._queuedChunkKeys.clear();
+    this._pendingRingLoads.clear();
+    this.generatedRadius = 0;
+    this._queuedRadius = 0;
   }
 
   getSpawnPoint() {
@@ -112,6 +127,13 @@ export class VoxelWorld {
 
   getBlockTotals() {
     return this.blockTotals;
+  }
+
+  updateStreaming(position) {
+    if (position) {
+      this._scheduleExpansion(position);
+    }
+    this._pumpGenerationQueue();
   }
 
   sampleTerrainHeight(x, z) {
@@ -331,6 +353,82 @@ export class VoxelWorld {
     if (Number.isInteger(nextType) && nextType >= 0) {
       const current = this.blockTotals[nextType] ?? 0;
       this.blockTotals[nextType] = current + 1;
+    }
+  }
+
+  _scheduleExpansion(position) {
+    const chunkX = Math.floor(position.x / CHUNK_SIZE);
+    const chunkZ = Math.floor(position.z / CHUNK_SIZE);
+    const distance = Math.max(Math.abs(chunkX), Math.abs(chunkZ));
+    const desiredRadius = Math.min(this.maxChunkRadius, distance + this.chunkRadius);
+    if (desiredRadius <= this._queuedRadius) return;
+    this._queueRings(this._queuedRadius + 1, desiredRadius);
+    this._queuedRadius = desiredRadius;
+  }
+
+  _queueRings(startRadius, endRadius) {
+    for (let radius = startRadius; radius <= endRadius; radius += 1) {
+      let needed = 0;
+      for (let cz = -radius; cz <= radius; cz += 1) {
+        for (let cx = -radius; cx <= radius; cx += 1) {
+          if (Math.max(Math.abs(cx), Math.abs(cz)) !== radius) continue;
+          const key = chunkKey(cx, cz);
+          if (this.chunks.has(key) || this._queuedChunkKeys.has(key)) continue;
+          this._queuedChunkKeys.add(key);
+          this._generationQueue.push({ cx, cz, key, radius });
+          needed += 1;
+        }
+      }
+
+      if (needed === 0) {
+        this._markRingComplete(radius);
+      } else {
+        const current = this._pendingRingLoads.get(radius) ?? 0;
+        this._pendingRingLoads.set(radius, current + needed);
+      }
+    }
+  }
+
+  _pumpGenerationQueue(maxLoads = MAX_CHUNK_LOADS_PER_TICK) {
+    let processed = 0;
+    while (processed < maxLoads && this._generationQueue.length > 0) {
+      const { cx, cz, key, radius } = this._generationQueue.shift();
+      this._queuedChunkKeys.delete(key);
+      const existed = this.chunks.has(key);
+      const chunk = this._ensureChunk(cx, cz);
+      if (!existed) {
+        this.chunkList.push(chunk);
+      }
+      this._buildChunkMeshes(chunk);
+      this._markRingChunkGenerated(radius);
+      processed += 1;
+    }
+  }
+
+  _markRingChunkGenerated(radius) {
+    if (!this._pendingRingLoads.has(radius)) {
+      this._updateGeneratedRadius();
+      return;
+    }
+    const remaining = this._pendingRingLoads.get(radius) - 1;
+    if (remaining <= 0) {
+      this._pendingRingLoads.delete(radius);
+      this._updateGeneratedRadius();
+    } else {
+      this._pendingRingLoads.set(radius, remaining);
+    }
+  }
+
+  _markRingComplete(radius) {
+    this._pendingRingLoads.delete(radius);
+    this._updateGeneratedRadius();
+  }
+
+  _updateGeneratedRadius() {
+    while (this.generatedRadius < this._queuedRadius) {
+      const nextRadius = this.generatedRadius + 1;
+      if (this._pendingRingLoads.has(nextRadius)) break;
+      this.generatedRadius = nextRadius;
     }
   }
 }

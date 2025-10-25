@@ -7,7 +7,7 @@ import { Inventory, HOTBAR_SLOT_COUNT } from '../gameplay/inventory/Inventory.js
 import { WeatherSystem } from '../gameplay/systems/WeatherSystem.js';
 import { GameContext } from './GameContext.js';
 import { EventBus } from './services/EventBus.js';
-import { BLOCK_TYPES } from '../constants.js';
+import { BLOCK_TYPES, INITIAL_WORLD_RADIUS, EXTENDED_WORLD_RADIUS } from '../constants.js';
 
 const { PointerEventTypes } = BABYLON;
 
@@ -154,7 +154,10 @@ export class GameApp {
 
   async _loadWorld() {
     this._setLoadingState(true, 'Generating terrain…', 0);
-    this.world = new VoxelWorld(this.context, { chunkRadius: 5 });
+    this.world = new VoxelWorld(this.context, {
+      chunkRadius: INITIAL_WORLD_RADIUS,
+      maxRadius: EXTENDED_WORLD_RADIUS,
+    });
     this.context.registerService('world', this.world);
     const { spawnPoint } = await this.world.generate((progress) => {
       this._setLoadingState(true, 'Generating terrain…', Math.round(progress * 80));
@@ -281,6 +284,7 @@ export class GameApp {
         }
 
         this.player.update(delta, frameInput);
+        this.world?.updateStreaming(this.player.mesh?.position ?? null);
         this.blockInteraction?.update(frameInput);
       }
 

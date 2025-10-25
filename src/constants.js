@@ -2,15 +2,16 @@ export const CHUNK_SIZE = 16;
 export const CHUNK_HEIGHT = 64;
 
 // Generation radii control how many chunk rings are created around the player.
-// The original configuration used radii of 1 and 2; increase them by 10× to
-// expand the explorable area significantly.
+// A starting radius of 10 keeps the initial load responsive, while the
+// extended limit of 55 unlocks roughly 100× the original explorable area when
+// combined with lazy chunk expansion.
 export const INITIAL_WORLD_RADIUS = 10;
-export const EXTENDED_WORLD_RADIUS = 20;
+export const EXTENDED_WORLD_RADIUS = 55;
 export const ALWAYS_RENDER_RADIUS = 3; // chunk rings kept in every direction
 export const VIEW_CULL_ANGLE_DEG = 140; // total degrees of forward render cone
 export const DEFAULT_RENDER_DISTANCE = INITIAL_WORLD_RADIUS;
 export const CHUNK_UNLOAD_PADDING = 2;
-export const MAX_CHUNK_LOADS_PER_TICK = 2;
+export const MAX_CHUNK_LOADS_PER_TICK = 8;
 
 export const BLOCK_TYPES = {
   air: 0,

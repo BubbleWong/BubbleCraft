@@ -1,3 +1,5 @@
+import { CHUNK_SIZE } from '../../../constants.js';
+
 const DEFAULT_WALK_SPEED = 5.5;
 const DEFAULT_SPRINT_MULTIPLIER = 1.65;
 const DEFAULT_JUMP_IMPULSE = 6.0;
@@ -111,7 +113,16 @@ export class PlayerController {
 
     const delta = this._velocity.scale(deltaSeconds);
     this.mesh.position.addInPlace(delta);
+    this._clampToWorldBounds();
     this._resolveGroundPenetration();
+  }
+
+  _clampToWorldBounds() {
+    const maxRadius = this.world?.maxChunkRadius;
+    if (!Number.isFinite(maxRadius)) return;
+    const limit = (maxRadius + 0.5) * CHUNK_SIZE;
+    this.mesh.position.x = Math.max(-limit, Math.min(limit, this.mesh.position.x));
+    this.mesh.position.z = Math.max(-limit, Math.min(limit, this.mesh.position.z));
   }
 
   _isGrounded() {

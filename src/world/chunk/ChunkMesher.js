@@ -107,7 +107,7 @@ export class ChunkMesher {
             const color = makeColor(baseColor, shade);
             const alpha = blockType === BLOCK_TYPES.water ? 0.68 : 1.0;
             const vertexBase = target.positions.length / 3;
-            const faceUV = this.atlas?.getBlockFaceUV(blockType, faceIndex);
+            const faceUV = this.atlas?.getBlockFaceUV(blockType, faceIndex, worldX, y, worldZ);
 
             for (let i = 0; i < 4; i += 1) {
               const corner = face.corners[i];

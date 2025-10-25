@@ -256,13 +256,13 @@ export class BlockAtlas {
 
   _paintGrassSide(x, y, variant = 0) {
     const size = this.tileSize;
-    const blend = this._smoothstep(0.2, 0.78, y / size);
+    const blend = this._smoothstep(0.08, 0.42, y / size);
     const top = this._paintGrassTop(x, y * 0.6, variant);
     const bottom = this._paintDirt(x, y, variant);
     let color = mixColors(top, bottom, blend);
 
     const tuftSeed = this._hash2D(Math.floor((x + variant * 11.5) / 6), Math.floor((y - variant * 8.9) / 6), 133.7 + variant * 19.4);
-    if (tuftSeed > 0.84 && blend < 0.45) {
+    if (tuftSeed > 0.84 && blend < 0.25) {
       color = lighten(color, (tuftSeed - 0.84) * 0.25);
     }
     return color;

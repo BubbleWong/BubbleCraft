@@ -105,36 +105,37 @@ export class BlockAtlas {
 
   _preparePalette() {
     this.palette = {
-      grassBase: hexToRgb('#4ea948'),
-      grassHighlight: hexToRgb('#63c15b'),
-      grassShadow: hexToRgb('#2f6d2f'),
+      grassBase: hexToRgb('#5eaf47'),
+      grassHighlight: hexToRgb('#7ec75d'),
+      grassShadow: hexToRgb('#346d35'),
       dirtBase: hexToRgb('#6f5034'),
-      dirtShadow: hexToRgb('#3d2516'),
-      stoneBase: hexToRgb('#7f8288'),
-      stoneLight: hexToRgb('#a9acb3'),
-      stoneDark: hexToRgb('#4b4f56'),
-      sandBase: hexToRgb('#decda1'),
-      sandDark: hexToRgb('#b79b71'),
-      woodBarkLight: hexToRgb('#8b5f33'),
-      woodBarkDark: hexToRgb('#65401f'),
-      woodRingLight: hexToRgb('#caa46d'),
-      woodRingDark: hexToRgb('#99683a'),
-      leafBase: hexToRgb('#4d9a3f'),
-      leafLight: hexToRgb('#7ac857'),
-      leafDark: hexToRgb('#2e6124'),
-      goldOre: hexToRgb('#ecd472'),
-      goldBright: hexToRgb('#f9ebb7'),
-      goldBaseStone: hexToRgb('#6c5f45'),
-      diamondOre: hexToRgb('#71d6f2'),
-      diamondBright: hexToRgb('#c2f0fe'),
-      diamondBaseStone: hexToRgb('#516472'),
+      dirtShadow: hexToRgb('#3a2216'),
+      stoneBase: hexToRgb('#868b91'),
+      stoneLight: hexToRgb('#b6bcc3'),
+      stoneDark: hexToRgb('#4a4f56'),
+      sandBase: hexToRgb('#e2cf9c'),
+      sandDark: hexToRgb('#b99866'),
+      barkLight: hexToRgb('#885c32'),
+      barkDark: hexToRgb('#5c3b1f'),
+      ringLight: hexToRgb('#caa16a'),
+      ringDark: hexToRgb('#966536'),
+      leafBase: hexToRgb('#4da13f'),
+      leafLight: hexToRgb('#81d061'),
+      leafDark: hexToRgb('#2f6124'),
+      vine: hexToRgb('#3c8b2e'),
+      goldBright: hexToRgb('#f3d976'),
+      goldMid: hexToRgb('#d0aa3c'),
+      goldStone: hexToRgb('#5f5741'),
+      diamondBright: hexToRgb('#9feefe'),
+      diamondMid: hexToRgb('#71d6f2'),
+      diamondStone: hexToRgb('#506273'),
+      waterShallow: hexToRgb('#348bdb'),
       waterDeep: hexToRgb('#1c3f85'),
-      waterShallow: hexToRgb('#2f6fce'),
-      mudBase: hexToRgb('#4b322a'),
-      mudDark: hexToRgb('#34231d'),
+      mudBase: hexToRgb('#4f362c'),
+      mudDark: hexToRgb('#332019'),
       neutralSoft: hexToRgb('#bfc3c8'),
-      neutralDark: hexToRgb('#8a8f94'),
-      neutralLight: hexToRgb('#dddddd'),
+      neutralDark: hexToRgb('#898e92'),
+      neutralLight: hexToRgb('#e0e2e5'),
     };
   }
 
@@ -147,7 +148,7 @@ export class BlockAtlas {
   }
 
   _drawTiles() {
-    const definitions = [
+    const defs = [
       ['grass_top', 0, 0, (x, y) => this._paintGrassTop(x, y)],
       ['grass_side', 1, 0, (x, y) => this._paintGrassSide(x, y)],
       ['dirt', 2, 0, (x, y) => this._paintDirt(x, y)],
@@ -156,15 +157,15 @@ export class BlockAtlas {
 
       ['wood_bark', 0, 1, (x, y) => this._paintWoodBark(x, y)],
       ['wood_top', 1, 1, (x, y) => this._paintWoodTop(x, y)],
-      ['leaves_dense', 2, 1, (x, y) => this._paintLeaves(x, y, true)],
-      ['leaves_soft', 3, 1, (x, y) => this._paintLeaves(x, y, false)],
+      ['leaves_dense', 2, 1, (x, y) => this._paintLeaves(x, y, 1.0)],
+      ['leaves_soft', 3, 1, (x, y) => this._paintLeaves(x, y, 0.65)],
       ['neutral_soft', 4, 1, (x, y) => this._paintNeutral(x, y, this.palette.neutralSoft)],
 
       ['ore_gold', 0, 2, (x, y) => this._paintGoldOre(x, y)],
       ['ore_diamond', 1, 2, (x, y) => this._paintDiamondOre(x, y)],
       ['water', 2, 2, (x, y) => this._paintWater(x, y)],
       ['mud', 3, 2, (x, y) => this._paintMud(x, y)],
-      ['flower_tile', 4, 2, (x, y) => this._paintFlowerTile(x, y)],
+      ['flower_tile', 4, 2, (x, y) => this._paintGrassWithFlowers(x, y)],
 
       ['stone_polished', 0, 3, (x, y) => this._paintPolishedStone(x, y)],
       ['stone_brick', 1, 3, (x, y) => this._paintStoneBrick(x, y)],
@@ -173,7 +174,7 @@ export class BlockAtlas {
       ['neutral_light', 4, 3, (x, y) => this._paintNeutral(x, y, this.palette.neutralLight)],
     ];
 
-    definitions.forEach(([key, col, row, painter]) => {
+    defs.forEach(([key, col, row, painter]) => {
       this._paintTile(key, col, row, painter);
     });
 
@@ -201,23 +202,22 @@ export class BlockAtlas {
   }
 
   _paintGrassTop(x, y) {
-    const base = this._fbm(x, y, 12.31, 4);
-    let color = mixColors(this.palette.grassShadow, this.palette.grassHighlight, 0.35 + base * 0.5);
+    const base = this._fbm(x, y, 11.7, 4);
+    let color = mixColors(this.palette.grassShadow, this.palette.grassHighlight, 0.5 + base * 0.35);
 
-    const directional = Math.sin(x * 0.18 + Math.sin(y * 0.12) * 0.7);
-    color = mixColors(color, directional > 0 ? this.palette.grassHighlight : this.palette.grassShadow, Math.min(0.18, Math.abs(directional) * 0.18));
+    const bladeNoise = this._hash2D(Math.floor(x / 3), Math.floor(y / 3), 41.6);
+    if (bladeNoise > 0.8) {
+      const offset = bladeNoise - 0.8;
+      color = lighten(color, offset * 0.5);
+    }
 
-    const cellSize = 8;
-    const localX = (x % cellSize) / cellSize - 0.5;
-    const localY = (y % cellSize) / cellSize - 0.5;
-    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 93.17);
-    if (cellSeed > 0.985) {
-      const dist = Math.sqrt(localX * localX + localY * localY);
-      if (dist < 0.28) {
-        const hueChoice = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 211.5);
-        const petal = hueChoice > 0.66 ? lighten(this.palette.grassHighlight, 0.6) : lighten([255, 220, 180], 0.2);
-        color = mixColors(color, petal, Math.max(0, 0.28 - dist) * 2.4);
-      }
+    const nx = (x % 8) / 8 - 0.5;
+    const ny = (y % 8) / 8 - 0.5;
+    const bloomSeed = this._hash2D(Math.floor(x / 8), Math.floor(y / 8), 97.3);
+    const dist = Math.sqrt(nx * nx + ny * ny);
+    if (bloomSeed > 0.97 && dist < 0.28) {
+      const tint = bloomSeed > 0.985 ? [254, 224, 105] : [245, 248, 255];
+      color = mixColors(color, tint, (0.28 - dist) * 1.8);
     }
 
     return color;
@@ -225,48 +225,43 @@ export class BlockAtlas {
 
   _paintGrassSide(x, y) {
     const size = this.tileSize;
-    const blend = this._smoothstep(0.18, 0.72, y / size);
+    const blend = this._smoothstep(0.22, 0.78, y / size);
     const top = this._paintGrassTop(x, y * 0.6);
     const bottom = this._paintDirt(x, y);
     let color = mixColors(top, bottom, blend);
 
-    const highlight = Math.sin((x * 0.22) + this._hash2D(0, Math.floor(y / 6), 41.2)) * 0.1;
-    if (highlight > 0) color = mixColors(color, this.palette.grassHighlight, highlight * 0.6);
+    const tuftSeed = this._hash2D(Math.floor(x / 6), Math.floor(y / 6), 133.7);
+    if (tuftSeed > 0.85 && blend < 0.6) {
+      const height = 0.18 + (tuftSeed - 0.85) * 0.35;
+      color = lighten(color, height);
+    }
     return color;
   }
 
   _paintDirt(x, y) {
-    const base = this._fbm(x, y, 33.71, 4);
-    let color = mixColors(this.palette.dirtShadow, this.palette.dirtBase, 0.4 + base * 0.5);
+    const base = this._fbm(x, y, 31.5, 4);
+    let color = mixColors(this.palette.dirtShadow, this.palette.dirtBase, 0.45 + base * 0.4);
 
-    const cellSize = 6;
-    const localX = (x % cellSize) / cellSize - 0.5;
-    const localY = (y % cellSize) / cellSize - 0.5;
-    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 58.9);
-    if (cellSeed > 0.78) {
-      const dist = Math.sqrt(localX * localX + localY * localY);
-      if (dist < 0.32) {
-        const pebbleTone = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 91.4);
-        const target = pebbleTone > 0.5 ? lighten(color, 0.25) : darken(color, 0.2);
-        color = mixColors(color, target, (0.32 - dist) * 2.4);
+    const pebbleSeed = this._hash2D(Math.floor(x / 5), Math.floor(y / 5), 201.4);
+    if (pebbleSeed > 0.82) {
+      const lx = (x % 5) / 5 - 0.5;
+      const ly = (y % 5) / 5 - 0.5;
+      const dist = Math.sqrt(lx * lx + ly * ly);
+      if (dist < 0.3) {
+        const pebbleColor = pebbleSeed > 0.9 ? lighten(color, 0.25) : darken(color, 0.25);
+        color = mixColors(color, pebbleColor, (0.3 - dist) * 2.4);
       }
     }
-
     return color;
   }
 
   _paintStone(x, y) {
-    const base = this._fbm(x, y, 45.2, 4);
-    let color = mixColors(this.palette.stoneDark, this.palette.stoneLight, 0.45 + base * 0.35);
+    const base = this._fbm(x, y, 46.9, 4);
+    let color = mixColors(this.palette.stoneDark, this.palette.stoneLight, 0.5 + base * 0.35);
 
-    const crack = Math.abs(Math.sin((x + y) * 0.09 + Math.sin(x * 0.04)) + Math.sin((x - y) * 0.07)) * 0.5;
-    if (crack > 0.6) {
-      color = mixColors(color, this.palette.stoneDark, Math.min(0.6, (crack - 0.6) * 1.4));
-    }
-
-    const highlight = this._hash2D(Math.floor(x / 7), Math.floor(y / 7), 201.4);
-    if (highlight > 0.85) {
-      color = mixColors(color, this.palette.stoneLight, 0.12);
+    const crack = Math.abs(Math.sin((x + y) * 0.08) + Math.sin((x - y) * 0.094));
+    if (crack > 1.4) {
+      color = mixColors(color, this.palette.stoneDark, (crack - 1.4) * 0.6);
     }
 
     return color;
@@ -274,20 +269,19 @@ export class BlockAtlas {
 
   _paintSand(x, y) {
     const base = this._fbm(x, y, 57.77, 3);
-    let color = mixColors(this.palette.sandBase, this.palette.sandDark, 0.45 + base * 0.25);
+    let color = mixColors(this.palette.sandBase, this.palette.sandDark, 0.45 + base * 0.3);
 
-    const dunes = Math.sin((y / this.tileSize) * TAU * 1.2 + Math.sin((x / this.tileSize) * TAU * 0.8) * 0.6);
-    color = mixColors(color, dunes > 0 ? lighten(color, dunes * 0.12) : darken(color, -dunes * 0.08), 0.5);
-
+    const ripple = Math.sin((y / this.tileSize) * TAU * 1.1 + Math.sin((x / this.tileSize) * TAU * 0.9) * 0.6);
+    color = mixColors(color, ripple > 0 ? lighten(color, ripple * 0.12) : darken(color, -ripple * 0.1), 0.6);
     return color;
   }
 
   _paintWoodBark(x, y) {
     const nx = x / this.tileSize;
-    const stripes = Math.sin(nx * TAU * 3.2 + Math.sin(nx * TAU * 1.1) * 0.5);
-    let color = stripes > 0 ? this.palette.woodBarkLight : this.palette.woodBarkDark;
-    const noise = this._fbm(x, y, 61.3, 3);
-    color = mixColors(color, stripes > 0 ? lighten(color, noise * 0.15) : darken(color, noise * 0.1), 0.5);
+    const stripes = Math.sin(nx * TAU * 3 + Math.sin(nx * TAU * 1.2) * 0.6);
+    let color = stripes > 0 ? this.palette.barkLight : this.palette.barkDark;
+    const noise = this._fbm(x, y, 64.5, 3);
+    color = mixColors(color, stripes > 0 ? lighten(color, noise * 0.2) : darken(color, noise * 0.18), 0.4);
     return color;
   }
 
@@ -297,27 +291,32 @@ export class BlockAtlas {
     const dx = (x - cx) / this.tileSize;
     const dy = (y - cy) / this.tileSize;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const rings = Math.sin(dist * TAU * 6 + this._hash2D(Math.floor(dist * 10), 0, 32.8));
-    let color = mixColors(this.palette.woodRingLight, this.palette.woodRingDark, 0.5 + rings * 0.1);
+
+    const ring = Math.sin(dist * TAU * 6 + this._hash2D(Math.floor(dist * 10), 0, 42.5));
+    let color = mixColors(this.palette.ringDark, this.palette.ringLight, 0.5 + ring * 0.2);
     const noise = this._fbm(x, y, 77.9, 3);
     color = mixColors(color, noise > 0.5 ? lighten(color, (noise - 0.5) * 0.3) : darken(color, (0.5 - noise) * 0.3), 0.4);
     return color;
   }
 
-  _paintLeaves(x, y, dense) {
-    const baseNoise = this._fbm(x, y, dense ? 82.4 : 84.9, 4);
-    let color = mixColors(this.palette.leafDark, this.palette.leafLight, 0.45 + baseNoise * 0.4);
+  _paintLeaves(x, y, density) {
+    const noise = this._fbm(x, y, 82.4 * density, 4);
+    let color = mixColors(this.palette.leafDark, this.palette.leafLight, 0.45 + noise * 0.4);
 
-    const cellSize = dense ? 5 : 6;
-    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), dense ? 121.7 : 126.3);
+    const cellSize = 6;
+    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 133.5 * density);
     if (cellSeed > 0.88) {
       const lx = (x % cellSize) / cellSize - 0.5;
       const ly = (y % cellSize) / cellSize - 0.5;
       const dist = Math.sqrt(lx * lx + ly * ly);
-      if (dist < 0.3) {
-        const varColor = cellSeed > 0.92 ? lighten(color, 0.25) : darken(color, 0.25);
-        color = mixColors(color, varColor, (0.3 - dist) * 2.1);
+      if (dist < 0.28) {
+        const tint = cellSeed > 0.95 ? lighten(color, 0.22) : darken(color, 0.15);
+        color = mixColors(color, tint, (0.28 - dist) * 2.4 * density);
       }
+    }
+
+    if (density > 0.9 && this._hash2D(Math.floor(x / 8), Math.floor(y / 8), 77.2) > 0.92) {
+      color = mixColors(color, lighten(color, 0.18), 0.4);
     }
 
     return color;
@@ -326,14 +325,14 @@ export class BlockAtlas {
   _paintGoldOre(x, y) {
     let color = this._paintStone(x, y);
     const cellSize = 7;
-    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 205.4);
-    if (cellSeed > 0.7) {
+    const seed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 205.4);
+    if (seed > 0.7) {
       const lx = (x % cellSize) / cellSize - 0.5;
       const ly = (y % cellSize) / cellSize - 0.5;
       const dist = Math.sqrt(lx * lx + ly * ly);
       if (dist < 0.38) {
-        const oreMix = Math.max(0, 0.38 - dist) * 1.8;
-        color = mixColors(color, cellSeed > 0.9 ? this.palette.goldBright : this.palette.goldOre, oreMix);
+        const mix = (0.38 - dist) * 2.2;
+        color = mixColors(color, seed > 0.9 ? this.palette.goldBright : this.palette.goldMid, mix);
       }
     }
     return color;
@@ -342,14 +341,14 @@ export class BlockAtlas {
   _paintDiamondOre(x, y) {
     let color = this._paintStone(x, y);
     const cellSize = 7;
-    const cellSeed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 221.6);
-    if (cellSeed > 0.73) {
+    const seed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 219.7);
+    if (seed > 0.72) {
       const lx = (x % cellSize) / cellSize - 0.5;
       const ly = (y % cellSize) / cellSize - 0.5;
       const dist = Math.sqrt(lx * lx + ly * ly);
       if (dist < 0.35) {
-        const oreMix = Math.max(0, 0.35 - dist) * 2.0;
-        color = mixColors(color, cellSeed > 0.92 ? this.palette.diamondBright : this.palette.diamondOre, oreMix);
+        const mix = (0.35 - dist) * 2.4;
+        color = mixColors(color, seed > 0.92 ? this.palette.diamondBright : this.palette.diamondMid, mix);
       }
     }
     return color;
@@ -359,28 +358,35 @@ export class BlockAtlas {
     const t = y / this.tileSize;
     let color = mixColors(this.palette.waterShallow, this.palette.waterDeep, this._smoothstep(0, 1, t));
     const wave = Math.sin((y / this.tileSize) * TAU * 1.4 + Math.sin((x / this.tileSize) * TAU * 2.1) * 0.8);
-    color = mixColors(color, wave > 0 ? lighten(color, wave * 0.18) : darken(color, -wave * 0.12), 0.5);
+    color = mixColors(color, wave > 0 ? lighten(color, wave * 0.15) : darken(color, -wave * 0.1), 0.4);
     return color;
   }
 
   _paintMud(x, y) {
     const noise = this._fbm(x, y, 132.4, 3);
-    let color = mixColors(this.palette.mudDark, this.palette.mudBase, 0.4 + noise * 0.4);
+    let color = mixColors(this.palette.mudDark, this.palette.mudBase, 0.45 + noise * 0.4);
     if (noise > 0.6) color = mixColors(color, lighten(color, (noise - 0.6) * 0.4), 0.5);
     return color;
   }
 
-  _paintFlowerTile(x, y) {
+  _paintGrassWithFlowers(x, y) {
     let color = this._paintGrassTop(x, y);
-    const sway = Math.sin((x / this.tileSize) * TAU * 1.8 + (y / this.tileSize) * TAU * 1.6);
-    if (sway > 0.75) {
-      color = mixColors(color, lighten(color, 0.25), (sway - 0.75) * 1.2);
+    const cellSize = 10;
+    const seed = this._hash2D(Math.floor(x / cellSize), Math.floor(y / cellSize), 311.9);
+    if (seed > 0.925) {
+      const lx = (x % cellSize) / cellSize - 0.5;
+      const ly = (y % cellSize) / cellSize - 0.5;
+      const dist = Math.sqrt(lx * lx + ly * ly);
+      if (dist < 0.25) {
+        const colorChoice = seed > 0.97 ? [255, 239, 135] : [248, 248, 255];
+        color = mixColors(color, colorChoice, (0.25 - dist) * 2.6);
+      }
     }
     return color;
   }
 
   _paintPolishedStone(x, y) {
-    let color = mixColors(this.palette.stoneBase, this.palette.stoneLight, 0.5 + this._fbm(x, y, 147.2, 3) * 0.2);
+    let color = mixColors(this.palette.stoneBase, this.palette.stoneLight, 0.55 + this._fbm(x, y, 147.2, 3) * 0.2);
     const highlight = Math.sin((x + y) * 0.05 + this._hash2D(Math.floor(x / 8), Math.floor(y / 8), 321.1));
     if (highlight > 0.6) color = mixColors(color, lighten(color, 0.2), (highlight - 0.6) * 0.6);
     return color;
@@ -391,12 +397,12 @@ export class BlockAtlas {
     const size = this.tileSize;
     const rows = 3;
     const cols = 4;
-    const horizontal = y % (size / rows);
-    const vertical = x % (size / cols);
     const mortar = 1.5;
     let color = base;
-    if (horizontal < mortar || vertical < mortar) {
-      color = mixColors(color, this.palette.neutralLight, 0.55);
+    const rowPos = y % (size / rows);
+    const colPos = x % (size / cols);
+    if (rowPos < mortar || colPos < mortar) {
+      color = mixColors(color, this.palette.neutralLight, 0.6);
     }
     return color;
   }
@@ -412,9 +418,9 @@ export class BlockAtlas {
 
   _paintNeutral(x, y, baseColor) {
     const noise = this._fbm(x, y, 179.1, 3);
-    const delta = (noise - 0.5) * 0.1;
-    if (delta > 0) return mixColors(baseColor, lighten(baseColor, delta * 1.4), Math.min(1, delta / 0.1));
-    return mixColors(baseColor, darken(baseColor, -delta * 1.4), Math.min(1, -delta / 0.1));
+    const delta = (noise - 0.5) * 0.12;
+    if (delta > 0) return mixColors(baseColor, lighten(baseColor, delta * 1.2), Math.min(1, delta / 0.12));
+    return mixColors(baseColor, darken(baseColor, -delta * 1.2), Math.min(1, -delta / 0.12));
   }
 
   _fbm(x, y, seed, octaves = 3) {

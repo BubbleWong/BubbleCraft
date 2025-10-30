@@ -4,7 +4,7 @@ const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
 const crosshair = document.getElementById('crosshair');
 const hud = document.getElementById('hud');
-const fpsHud = document.getElementById('hud-fps');
+const hudRight = document.getElementById('hud-right');
 const loadingOverlay = document.getElementById('loading');
 const loadingLabel = document.getElementById('loading-label');
 const loadingBar = document.getElementById('loading-bar');
@@ -22,7 +22,7 @@ const app = new GameApp({
   overlay,
   crosshair,
   hud,
-  fpsHud,
+  hudRight,
   loadingUi,
 });
 

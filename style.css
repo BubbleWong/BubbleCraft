@@ -30,7 +30,6 @@ canvas#game {
   pointer-events: none;
   white-space: nowrap;
   z-index: 10;
-  min-width: 12rem;
 }
 
 .hud.hidden {

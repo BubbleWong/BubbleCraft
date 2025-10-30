@@ -1,4 +1,4 @@
-import { BLOCK_TYPES, BLOCK_TYPE_LABELS, BLOCK_COLORS, FLOWER_UI_COLOR } from '../constants.js';
+import { CHUNK_SIZE, BLOCK_TYPES, BLOCK_TYPE_LABELS, BLOCK_COLORS, FLOWER_UI_COLOR } from '../constants.js';
 import { WEATHER_LABELS, TIME_OF_DAY_LABELS } from '../gameplay/systems/WeatherSystem.js';
 
 const HEART_PER_POINT = 2;
@@ -12,15 +12,18 @@ function blockColorToCss(type) {
 }
 
 export class HudManager {
-  constructor({ hudEl, inventoryEl, healthEl }) {
+  constructor({ hudEl, inventoryEl, healthEl, rightEl }) {
     this.hudEl = hudEl ?? null;
     this.inventoryEl = inventoryEl ?? null;
     this.healthEl = healthEl ?? null;
+    this.rightEl = rightEl ?? null;
 
     this.inventory = null;
     this.activeSlot = 0;
     this.worldInfo = null;
     this.targetInfo = null;
+    this.detailsExpanded = false;
+    this.fpsValue = 0;
   }
 
   bindInventory(inventory) {
@@ -104,15 +107,33 @@ export class HudManager {
     }
   }
 
-  _render() {
-    if (!this.hudEl) return;
-    if (!this.worldInfo) {
-      this.hudEl.innerHTML = '';
-      return;
+  toggleDetails(force = null) {
+    if (!this.rightEl) return;
+    if (typeof force === 'boolean') {
+      this.detailsExpanded = force;
+    } else {
+      this.detailsExpanded = !this.detailsExpanded;
     }
+    this._render();
+  }
 
-    const lines = [];
-    const { position, weatherState, blockTotals } = this.worldInfo;
+  updateFps(fps) {
+    if (!Number.isFinite(fps)) {
+      this.fpsValue = 0;
+    } else {
+      this.fpsValue = Math.max(0, fps);
+    }
+    this._render();
+  }
+
+  _render() {
+    const worldInfo = this.worldInfo;
+
+    const mainLines = [];
+    const rightLines = [];
+    const position = worldInfo?.position ?? null;
+    const weatherState = worldInfo?.weatherState ?? null;
+    const blockTotals = worldInfo?.blockTotals ?? null;
 
     if (weatherState) {
       const weatherLabel = WEATHER_LABELS[weatherState.weather] ?? weatherState.weather;
@@ -121,41 +142,55 @@ export class HudManager {
       if (!weatherState.autoWeather) flags.push('manual weather');
       if (!weatherState.autoTime) flags.push('manual time');
       const suffix = flags.length > 0 ? ` (${flags.join(', ')})` : '';
-      lines.push(`Weather: ${weatherLabel} · ${timeLabel}${suffix}`);
+      mainLines.push(`Weather: ${weatherLabel} · ${timeLabel}${suffix}`);
     }
 
     if (position) {
-      lines.push(`XYZ: ${position.x.toFixed(1)} ${position.y.toFixed(1)} ${position.z.toFixed(1)}`);
+      mainLines.push(`GPS: ${position.x.toFixed(1)} ${position.y.toFixed(1)} ${position.z.toFixed(1)}`);
     }
 
-    if (Array.isArray(blockTotals)) {
-      let typeCount = 0;
-      const blockLines = [];
-      for (const [key, label] of Object.entries(BLOCK_TYPE_LABELS)) {
-        const typeIndex = Number(key);
-        const amount = blockTotals[typeIndex] ?? 0;
-        if (amount > 0) {
-          typeCount += 1;
-          blockLines.push(`${label}: ${amount}`);
-        }
-      }
-      lines.push(`Types: ${typeCount}`);
-      lines.push(...blockLines);
-    }
+    rightLines.push(`FPS: ${this.fpsValue.toFixed(1)}`);
 
-    if (this.targetInfo) {
-      const { selectedType, targetedType, distance } = this.targetInfo;
+    if (this.detailsExpanded) {
+      const targetInfo = this.targetInfo ?? { selectedType: BLOCK_TYPES.air, targetedType: null, distance: null };
+      const { selectedType, targetedType, distance } = targetInfo;
       const selectedLabel = BLOCK_TYPE_LABELS[selectedType] ?? 'Empty';
       let targetLabel = 'None';
       if (Number.isInteger(targetedType)) {
         targetLabel = BLOCK_TYPE_LABELS[targetedType] ?? `Block ${targetedType}`;
       }
       const distanceText = Number.isFinite(distance) ? `${distance.toFixed(2)}m` : '—';
-      lines.push(`Held: ${selectedLabel}`);
-      lines.push(`Target: ${targetLabel}`);
-      lines.push(`Dist: ${distanceText}`);
+      rightLines.push(`Held: ${selectedLabel}`);
+      rightLines.push(`Target: ${targetLabel}`);
+      rightLines.push(`Dist: ${distanceText}`);
+
+      if (position) {
+        const chunkX = Math.floor(position.x / CHUNK_SIZE);
+        const chunkZ = Math.floor(position.z / CHUNK_SIZE);
+        rightLines.push(`Chunk: ${chunkX}, ${chunkZ}`);
+      }
+
+      if (Array.isArray(blockTotals)) {
+        let typeCount = 0;
+        const blockLines = [];
+        for (const [key, label] of Object.entries(BLOCK_TYPE_LABELS)) {
+          const typeIndex = Number(key);
+          const amount = blockTotals[typeIndex] ?? 0;
+          if (amount > 0) {
+            typeCount += 1;
+            blockLines.push(`${label}: ${amount}`);
+          }
+        }
+        rightLines.push(`Types: ${typeCount}`);
+        rightLines.push(...blockLines);
+      }
     }
 
-    this.hudEl.innerHTML = lines.map((text) => `<div>${text}</div>`).join('');
+    if (this.hudEl) {
+      this.hudEl.innerHTML = mainLines.map((text) => `<div>${text}</div>`).join('');
+    }
+    if (this.rightEl) {
+      this.rightEl.innerHTML = rightLines.map((text) => `<div>${text}</div>`).join('');
+    }
   }
 }

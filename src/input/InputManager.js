@@ -28,6 +28,7 @@ export class InputManager {
     this._pitch = 0;
     this._hotbarIndex = 0;
     this._hotbarDirty = true;
+    this._toggleHudDetailsRequested = false;
 
     this._handleKeyDown = (event) => this._onKeyDown(event);
     this._handleKeyUp = (event) => this._onKeyUp(event);
@@ -112,6 +113,7 @@ export class InputManager {
       pointerLocked: this._pointerLocked,
       hotbarIndex: this._hotbarIndex,
       hotbarChanged: this._consumeHotbarDirty(),
+      toggleHudDetails: this._consumeToggleHudDetails(),
     };
   }
 
@@ -123,6 +125,12 @@ export class InputManager {
     const dirty = this._hotbarDirty;
     this._hotbarDirty = false;
     return dirty;
+  }
+
+  _consumeToggleHudDetails() {
+    const requested = this._toggleHudDetailsRequested;
+    this._toggleHudDetailsRequested = false;
+    return requested;
   }
 
   _onKeyDown(event) {
@@ -155,6 +163,11 @@ export class InputManager {
         this._setHotbarIndex(digit - 1);
         event.preventDefault();
       }
+    }
+
+    if (event.code === 'KeyI') {
+      event.preventDefault();
+      this._toggleHudDetailsRequested = true;
     }
   }
 

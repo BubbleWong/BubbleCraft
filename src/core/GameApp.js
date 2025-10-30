@@ -16,12 +16,12 @@ const FPS_UPDATE_INTERVAL = 0.5;
 const FPS_SMOOTHING = 0.82;
 
 export class GameApp {
-  constructor({ canvas, overlay, crosshair, hud, fpsHud, loadingUi } = {}) {
+  constructor({ canvas, overlay, crosshair, hud, hudRight, loadingUi } = {}) {
     this.canvas = canvas;
     this.overlay = overlay ?? null;
     this.crosshair = crosshair ?? null;
     this.hudEl = hud ?? null;
-    this.fpsHud = fpsHud ?? null;
+    this.hudRightEl = hudRight ?? null;
     this.loadingUi = loadingUi ?? null;
     this.inventoryEl = document.getElementById('inventory');
     this.healthEl = document.getElementById('health');
@@ -182,6 +182,7 @@ export class GameApp {
       hudEl: this.hudEl,
       inventoryEl: this.inventoryEl,
       healthEl: this.healthEl,
+      rightEl: this.hudRightEl,
     });
     this.context.registerService('hud', this.hud);
     this.hud.bindInventory(this.inventory);
@@ -286,6 +287,9 @@ export class GameApp {
         this.player.update(delta, frameInput);
         this.world?.updateStreaming(this.player.mesh?.position ?? null);
         this.blockInteraction?.update(frameInput);
+        if (frameInput.toggleHudDetails) {
+          this.hud?.toggleDetails();
+        }
       }
 
       this.weatherSystem?.update(delta);
@@ -349,12 +353,11 @@ export class GameApp {
   }
 
   _updateFpsHud(fps) {
-    if (!this.fpsHud) return;
     const clamped = Number.isFinite(fps) ? Math.max(0, fps) : 0;
     this._fpsSmoothed = this._fpsSmoothed === 0
       ? clamped
       : this._fpsSmoothed * FPS_SMOOTHING + clamped * (1 - FPS_SMOOTHING);
-    this.fpsHud.textContent = `FPS: ${this._fpsSmoothed.toFixed(1)}`;
+    this.hud?.updateFps(this._fpsSmoothed);
   }
 
   _onInventoryChanged() {

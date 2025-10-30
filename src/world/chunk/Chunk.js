@@ -48,11 +48,13 @@ export class Chunk {
 
   disposeMeshes() {
     if (this.mesh) {
-      this.mesh.dispose(false, true);
+      this.mesh.material = null;
+      this.mesh.dispose(false, false);
       this.mesh = null;
     }
     if (this.waterMesh) {
-      this.waterMesh.dispose(false, true);
+      this.waterMesh.material = null;
+      this.waterMesh.dispose(false, false);
       this.waterMesh = null;
     }
   }

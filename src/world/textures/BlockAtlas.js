@@ -118,6 +118,17 @@ export class BlockAtlas {
     return [(uMin + uMax) * 0.5, (vMin + vMax) * 0.5];
   }
 
+  dispose() {
+    if (this.texture) {
+      this.texture.dispose();
+      this.texture = null;
+    }
+    this._ctx = null;
+    if (this._uvLookup) {
+      this._uvLookup.clear();
+    }
+  }
+
   _preparePalette() {
     this.palette = {
       grassBase: hexToRgb('#5eaf47'),

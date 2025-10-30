@@ -119,6 +119,13 @@ export class VoxelWorld {
     this._pendingRingLoads.clear();
     this.generatedRadius = 0;
     this._queuedRadius = 0;
+    this.solidMaterial?.dispose();
+    this.solidMaterial = null;
+    this.waterMaterial?.dispose();
+    this.waterMaterial = null;
+    this.blockAtlas?.dispose?.();
+    this.blockAtlas = null;
+    this.chunkMesher = null;
   }
 
   getSpawnPoint() {

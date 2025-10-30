@@ -72,11 +72,14 @@ const WEATHER_CONFIG = {
   [WEATHER_TYPES.RAIN]: {
     precipitation: {
       type: 'rain',
-      speedRange: [14, 24],
-      size: 0.12,
-      opacity: 0.72,
-      color: 0x6aa9ff,
-      drift: { x: [-6, -2], z: [-2, 2] },
+      speedRange: [16, 28],
+      size: 0.18,
+      opacity: 0.9,
+      color: 0x78b7ff,
+      drift: { x: [-5, -1], z: [-1.2, 1.2] },
+      width: 42,
+      height: 52,
+      density: 1.6,
     },
     lightningFrequency: 0,
     day: {
@@ -110,6 +113,9 @@ const WEATHER_CONFIG = {
       opacity: 0.9,
       color: 0xffffff,
       drift: { x: [-1.2, 1.2], z: [-1.2, 1.2] },
+      width: 55,
+      height: 45,
+      density: 0.85,
     },
     lightningFrequency: 0,
     day: {
@@ -138,11 +144,14 @@ const WEATHER_CONFIG = {
   [WEATHER_TYPES.THUNDERSTORM]: {
     precipitation: {
       type: 'rain',
-      speedRange: [18, 32],
-      size: 0.14,
-      opacity: 0.78,
-      color: 0x9cc7ff,
-      drift: { x: [-9, -3], z: [-3, 3] },
+      speedRange: [20, 36],
+      size: 0.2,
+      opacity: 0.95,
+      color: 0xa5d0ff,
+      drift: { x: [-8, -3], z: [-2, 2] },
+      width: 46,
+      height: 56,
+      density: 2.1,
     },
     lightningFrequency: 0.28,
     day: {
@@ -414,20 +423,28 @@ export class WeatherSystem {
     if (!system || !emitter) return;
 
     const drift = settings.drift ?? { x: [-1, 1], z: [-1, 1] };
+    const width = settings.width ?? PRECIPITATION_WIDTH;
+    const height = settings.height ?? PRECIPITATION_HEIGHT;
+    const density = Math.max(0.2, settings.density ?? 1);
+    const resetPadding = settings.resetPadding ?? PRECIPITATION_RESET_PADDING;
     const [minSpeed, maxSpeed] = settings.speedRange ?? [10, 18];
     const boxEmitter = system.particleEmitterType;
     if (boxEmitter && typeof boxEmitter.minEmitBox !== 'undefined') {
-      const halfWidth = PRECIPITATION_WIDTH * 0.5;
+      const halfWidth = width * 0.5;
       boxEmitter.minEmitBox.set(-halfWidth, 0, -halfWidth);
-      boxEmitter.maxEmitBox.set(halfWidth, PRECIPITATION_HEIGHT, halfWidth);
-      boxEmitter.direction1 = new BABYLON.Vector3(drift.x[0], -1, drift.z[0]);
-      boxEmitter.direction2 = new BABYLON.Vector3(drift.x[1], -1, drift.z[1]);
+      boxEmitter.maxEmitBox.set(halfWidth, height, halfWidth);
+      const dirX0 = Array.isArray(drift.x) ? drift.x[0] : drift.x ?? -1;
+      const dirX1 = Array.isArray(drift.x) ? drift.x[1] : drift.x ?? 1;
+      const dirZ0 = Array.isArray(drift.z) ? drift.z[0] : drift.z ?? -1;
+      const dirZ1 = Array.isArray(drift.z) ? drift.z[1] : drift.z ?? 1;
+      boxEmitter.direction1 = new BABYLON.Vector3(dirX0, -1, dirZ0);
+      boxEmitter.direction2 = new BABYLON.Vector3(dirX1, -1, dirZ1);
     }
 
     system.minEmitPower = minSpeed;
     system.maxEmitPower = maxSpeed;
-    const lifeMin = PRECIPITATION_HEIGHT / Math.max(maxSpeed, 0.1);
-    const lifeMax = (PRECIPITATION_HEIGHT + PRECIPITATION_RESET_PADDING) / Math.max(minSpeed, 0.1);
+    const lifeMin = height / Math.max(maxSpeed, 0.1);
+    const lifeMax = (height + resetPadding) / Math.max(minSpeed, 0.1);
     system.minLifeTime = lifeMin;
     system.maxLifeTime = lifeMax;
 
@@ -443,6 +460,11 @@ export class WeatherSystem {
     system.color2 = this._color4B.clone();
     system.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
     system.particleTexture = this._getParticleTexture(isSnow ? 'snow' : 'rain');
+
+    const capacity = typeof system.getCapacity === 'function'
+      ? system.getCapacity()
+      : (typeof system.capacity === 'number' ? system.capacity : PRECIPITATION_COUNT);
+    system.emitRate = capacity * 4 * density;
 
     this._setActivePrecipitation({ system, emitter, settings });
   }

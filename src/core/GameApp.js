@@ -212,11 +212,11 @@ export class GameApp {
 
     if (!this.pointerObserver) {
       this.pointerObserver = this.scene.onPointerObservable.add((pointerInfo) => {
-        console.log('[pointer]', {
-          pointerType: pointerInfo.type,
-          button: pointerInfo.event?.button,
-          locked: this.input?.isPointerLocked?.(),
-        });
+        // console.log('[pointer]', {
+        //   pointerType: pointerInfo.type,
+        //   button: pointerInfo.event?.button,
+        //   locked: this.input?.isPointerLocked?.(),
+        // });
         if (!this.input?.isPointerLocked?.()) return;
         if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) return;
         const evt = pointerInfo.event;

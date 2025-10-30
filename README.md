@@ -5,9 +5,7 @@ The current in-browser implementation now uses Babylon.js for rendering and chun
 
 ## Developer Setup (2025-10)
 
-- Install dependencies: `npm install`
-- Start the dev server: `npm run dev`
-- Build for production: `npm run build`
+No build tooling is required. Serve the repository with any static HTTP server (for example `python -m http.server`) and open `index.html` in your browser. All scripts are loaded directly in the page, and Babylon.js is pulled from the official CDN.
 
 ## Code Structure
 

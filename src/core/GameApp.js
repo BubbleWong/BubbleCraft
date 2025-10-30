@@ -173,6 +173,7 @@ export class GameApp {
       input: this.input,
     });
     this.player.setSpawnPoint(spawnPoint);
+    this.weatherSystem?.setPlayer(this.player);
     this.context.registerService('player', this.player);
     this.eventBus.emit('player:spawn', { player: this.player, spawnPoint });
 

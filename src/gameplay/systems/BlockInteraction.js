@@ -14,6 +14,7 @@ export class BlockInteraction {
     this.onInventoryChange = onInventoryChange ?? (() => {});
     this.context = context;
     this.eventBus = eventBus ?? context?.eventBus ?? null;
+    this.sound = context?.getService?.('sound') ?? null;
 
     this.activeSlot = 0;
     this.currentTarget = null;
@@ -148,6 +149,7 @@ export class BlockInteraction {
     const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, BLOCK_TYPES.air);
     // console.log('[blockInteraction] break attempt', { worldX, worldY, worldZ, blockType, changed });
     if (!changed) return;
+    this.sound?.playBlockBreak(blockType);
 
     if (this.inventory) {
       const remaining = this.inventory.add(blockType, 1);
@@ -194,6 +196,7 @@ export class BlockInteraction {
     const placed = this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);
     // console.log('[blockInteraction] place attempt', { worldX, worldY, worldZ, placeType, placed });
     if (!placed) return;
+    this.sound?.playBlockPlace(placeType);
 
     const removed = this.inventory.removeFromSlot(this.activeSlot, 1);
     if (removed > 0) {

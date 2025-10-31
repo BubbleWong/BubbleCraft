@@ -7,6 +7,7 @@ import { Inventory, HOTBAR_SLOT_COUNT } from '../gameplay/inventory/Inventory.js
 import { WeatherSystem } from '../gameplay/systems/WeatherSystem.js';
 import { GameContext } from './GameContext.js';
 import { EventBus } from './services/EventBus.js';
+import { SoundManager } from '../gameplay/audio/SoundManager.js';
 import { BLOCK_TYPES, INITIAL_WORLD_RADIUS, EXTENDED_WORLD_RADIUS } from '../constants.js';
 
 const { PointerEventTypes } = BABYLON;
@@ -38,10 +39,13 @@ export class GameApp {
     this.hud = null;
     this.blockInteraction = null;
     this.weatherSystem = null;
+    this.sound = null;
     this.hemisphereLight = null;
     this.sunLight = null;
     this.pointerObserver = null;
     this._eventDisposers = [];
+    this._worldReady = false;
+    this._overlaySoundListener = null;
 
     this.maxHealth = 20;
     this.currentHealth = 20;
@@ -97,9 +101,24 @@ export class GameApp {
           this.canvas.style.cursor = 'none';
         }
         this.hud?.setPointerLock(locked);
+        if (locked) {
+          this.sound?.resume();
+          if (this._worldReady) {
+            void this.sound?.resumeBgm();
+          }
+        } else {
+          this.sound?.pauseBgm();
+        }
       },
     });
     this.context.registerService('input', this.input);
+
+    this.sound = new SoundManager({ eventBus: this.eventBus });
+    this.context.registerService('sound', this.sound);
+    if (this.overlay) {
+      this._overlaySoundListener = () => this.sound?.resume();
+      this.overlay.addEventListener('pointerdown', this._overlaySoundListener);
+    }
 
     await this._loadWorld();
 
@@ -127,7 +146,12 @@ export class GameApp {
       this.pointerObserver = null;
     }
     this._clearEventBindings();
+    if (this.overlay && this._overlaySoundListener) {
+      this.overlay.removeEventListener('pointerdown', this._overlaySoundListener);
+      this._overlaySoundListener = null;
+    }
     this.input?.dispose();
+    this.sound?.dispose?.();
     this.player?.dispose();
     this.world?.dispose();
     this.scene?.dispose();
@@ -239,6 +263,15 @@ export class GameApp {
 
     if (this.canvas) {
       this.canvas.addEventListener('contextmenu', this._onCanvasContextMenu);
+    }
+
+    this._worldReady = true;
+    void this.sound?.prepareBgm?.();
+    if (this.input?.isPointerLocked?.()) {
+      this.sound?.resume();
+      void this.sound?.resumeBgm();
+    } else {
+      this.sound?.pauseBgm();
     }
 
     this._setLoadingState(false);

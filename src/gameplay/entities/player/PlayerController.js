@@ -1,4 +1,4 @@
-import { CHUNK_SIZE } from '../../../constants.js';
+import { CHUNK_SIZE, BLOCK_TYPES } from '../../../constants.js';
 
 const DEFAULT_WALK_SPEED = 5.5;
 const DEFAULT_SPRINT_MULTIPLIER = 1.65;
@@ -7,6 +7,8 @@ const GRAVITY = -22;
 const TERMINAL_VELOCITY = -48;
 const CAPSULE_HEIGHT = 1.78;
 const CAPSULE_RADIUS = 0.42;
+const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
+const FOOTSTEP_MIN_DISTANCE = 0.01;
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -16,6 +18,7 @@ export class PlayerController {
     this.input = input;
     this.context = context;
     this.eventBus = context?.eventBus ?? null;
+    this.sound = context?.getService?.('sound') ?? null;
 
     this.walkSpeed = DEFAULT_WALK_SPEED;
     this.sprintMultiplier = DEFAULT_SPRINT_MULTIPLIER;
@@ -36,6 +39,7 @@ export class PlayerController {
 
     this._velocity = new BABYLON.Vector3();
     this._spawnPoint = new BABYLON.Vector3(0, CAPSULE_HEIGHT, 0);
+    this._footstepAccumulator = 0;
   }
 
   setSpawnPoint(position) {
@@ -66,6 +70,7 @@ export class PlayerController {
   respawn() {
     this.mesh.position.copyFrom(this._spawnPoint);
     this._velocity.setAll(0);
+    this._footstepAccumulator = 0;
     this.eventBus?.emit('player:respawn', { position: this.mesh.position.clone(), player: this });
   }
 
@@ -87,6 +92,7 @@ export class PlayerController {
     const { move, sprint, jump } = inputState;
     const forward = new BABYLON.Vector3(Math.sin(this.mesh.rotation.y), 0, Math.cos(this.mesh.rotation.y));
     const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
+    const groundedBefore = this._isGrounded();
 
     const desired = new BABYLON.Vector3();
     desired.addInPlace(forward.scale(move.y));
@@ -102,8 +108,9 @@ export class PlayerController {
     this._velocity.x = desired.x;
     this._velocity.z = desired.z;
 
-    if (jump && this._isGrounded()) {
+    if (jump && groundedBefore) {
       this._velocity.y = this.jumpImpulse;
+      this.sound?.playJump();
     } else {
       this._velocity.y += GRAVITY * deltaSeconds;
       if (this._velocity.y < TERMINAL_VELOCITY) {
@@ -115,6 +122,9 @@ export class PlayerController {
     this.mesh.position.addInPlace(delta);
     this._clampToWorldBounds();
     this._resolveGroundPenetration();
+    const horizontalDistance = Math.hypot(delta.x, delta.z);
+    const groundedAfter = this._isGrounded();
+    this._handleFootsteps(groundedAfter, horizontalDistance);
   }
 
   _clampToWorldBounds() {
@@ -140,5 +150,31 @@ export class PlayerController {
         this._velocity.y = 0;
       }
     }
+  }
+
+  _handleFootsteps(grounded, horizontalDistance) {
+    if (grounded && horizontalDistance > FOOTSTEP_MIN_DISTANCE) {
+      this._footstepAccumulator += horizontalDistance;
+      if (this._footstepAccumulator >= FOOTSTEP_DISTANCE_INTERVAL) {
+        this._footstepAccumulator = 0;
+        const blockType = this._sampleGroundBlock();
+        this.sound?.playFootstep(blockType);
+      }
+    } else {
+      this._footstepAccumulator = 0;
+    }
+  }
+
+  _sampleGroundBlock() {
+    const worldX = Math.floor(this.mesh.position.x);
+    const worldZ = Math.floor(this.mesh.position.z);
+    const baseY = Math.floor(this.mesh.position.y - CAPSULE_HEIGHT * 0.5 - 0.1);
+    if (!this.world?.getBlockAtWorld) return BLOCK_TYPES.dirt;
+    let blockType = this.world.getBlockAtWorld(worldX, baseY, worldZ);
+    if (blockType === BLOCK_TYPES.air) {
+      blockType = this.world.getBlockAtWorld(worldX, baseY - 1, worldZ);
+    }
+    if (!Number.isFinite(blockType)) return BLOCK_TYPES.dirt;
+    return blockType;
   }
 }

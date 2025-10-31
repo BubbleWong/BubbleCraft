@@ -34,23 +34,24 @@ export class InputManager {
     this._handleKeyUp = (event) => this._onKeyUp(event);
     this._handlePointerMove = (event) => this._onPointerMove(event);
     this._handlePointerLockChange = () => this._syncPointerLockState();
+    this._handlePointerLockError = () => this._onPointerLockError();
     this._handleBlur = () => this._resetKeys();
+    this._handleOverlayPointerDown = (event) => this._onOverlayPointerDown(event);
 
     document.addEventListener('pointerlockchange', this._handlePointerLockChange);
+    document.addEventListener('pointerlockerror', this._handlePointerLockError);
     window.addEventListener('keydown', this._handleKeyDown);
     window.addEventListener('keyup', this._handleKeyUp);
     window.addEventListener('blur', this._handleBlur);
     window.addEventListener('mousemove', this._handlePointerMove);
 
     if (this.overlay) {
-      this.overlay.addEventListener('click', () => {
-        if (!this._pointerLocked) this.requestPointerLock();
-      });
+      this.overlay.addEventListener('pointerdown', this._handleOverlayPointerDown);
     }
 
     if (this.canvas) {
       this.canvas.addEventListener('click', () => {
-        if (!this._pointerLocked) this.requestPointerLock();
+        if (!this._pointerLocked) this.requestPointerLock({ source: 'canvas' });
       });
     }
 
@@ -59,15 +60,36 @@ export class InputManager {
 
   dispose() {
     document.removeEventListener('pointerlockchange', this._handlePointerLockChange);
+    document.removeEventListener('pointerlockerror', this._handlePointerLockError);
     window.removeEventListener('keydown', this._handleKeyDown);
     window.removeEventListener('keyup', this._handleKeyUp);
     window.removeEventListener('blur', this._handleBlur);
     window.removeEventListener('mousemove', this._handlePointerMove);
+    if (this.overlay) {
+      this.overlay.removeEventListener('pointerdown', this._handleOverlayPointerDown);
+    }
   }
 
-  requestPointerLock() {
+  requestPointerLock({ source = null } = {}) {
     if (this.canvas && this.canvas.requestPointerLock) {
-      this.canvas.requestPointerLock();
+      const handleFailure = (error) => {
+        if (error && error.name !== 'SecurityError') {
+          // eslint-disable-next-line no-console
+          console.warn('Pointer lock request failed', error);
+        }
+        if (source === 'overlay' && this.overlay) {
+          this.overlay.classList.remove('hidden');
+        }
+      };
+      try {
+        this.canvas.focus?.();
+        const result = this.canvas.requestPointerLock();
+        if (result?.catch instanceof Function) {
+          result.catch((error) => handleFailure(error));
+        }
+      } catch (error) {
+        handleFailure(error);
+      }
     }
   }
 
@@ -232,6 +254,19 @@ export class InputManager {
       this._updateAxes();
     }
     this._sprintActive = false;
+  }
+
+  _onPointerLockError() {
+    if (!document.pointerLockElement && this.overlay) {
+      this.overlay.classList.remove('hidden');
+    }
+  }
+
+  _onOverlayPointerDown(event) {
+    if (this._pointerLocked) return;
+    if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+    event.preventDefault();
+    this.requestPointerLock({ source: 'overlay' });
   }
 
   _setHotbarIndex(index) {

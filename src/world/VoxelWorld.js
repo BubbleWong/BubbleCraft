@@ -283,6 +283,7 @@ export class VoxelWorld {
     mesh.alphaIndex = alphaIndex;
     mesh.receiveShadows = true;
     mesh.metadata = { chunk, type };
+    mesh.checkCollisions = type === 'solid';
     return mesh;
   }
 

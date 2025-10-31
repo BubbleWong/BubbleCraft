@@ -71,6 +71,7 @@ export class GameApp {
 
     this.engine = new BABYLON.Engine(this.canvas, true, { adaptToDeviceRatio: true, preserveDrawingBuffer: false });
     this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true;
     this.scene.clearColor = new BABYLON.Color4(0.62, 0.78, 1.0, 1.0);
 
     this.camera = new BABYLON.FreeCamera('player-camera', new BABYLON.Vector3(0, 32, -32), this.scene);

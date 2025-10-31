@@ -466,6 +466,35 @@ export class WeatherSystem {
       : (typeof system.capacity === 'number' ? system.capacity : PRECIPITATION_COUNT);
     system.emitRate = capacity * 4 * density;
 
+    const driftXRange = Array.isArray(drift.x)
+      ? drift.x
+      : [drift.x ?? -1, drift.x ?? 1];
+    const driftZRange = Array.isArray(drift.z)
+      ? drift.z
+      : [drift.z ?? -1, drift.z ?? 1];
+    const halfWidth = width * 0.5;
+
+    if (typeof system.startDirectionFunction === 'function') {
+      system.startDirectionFunction = (particle) => {
+        const dirX = this._randomRange(driftXRange[0], driftXRange[1]);
+        const dirZ = this._randomRange(driftZRange[0], driftZRange[1]);
+        const dirY = -this._randomRange(0.92, 1.12);
+        particle.direction.x = dirX;
+        particle.direction.y = dirY;
+        particle.direction.z = dirZ;
+        const len = Math.hypot(dirX, dirY, dirZ) || 1;
+        particle.direction.scaleInPlace(1 / len);
+      };
+    }
+
+    if (typeof system.startPositionFunction === 'function') {
+      system.startPositionFunction = (particle) => {
+        particle.position.x = this._randomRange(-halfWidth, halfWidth);
+        particle.position.z = this._randomRange(-halfWidth, halfWidth);
+        particle.position.y = this._randomRange(0, height);
+      };
+    }
+
     this._setActivePrecipitation({ system, emitter, settings });
   }
 

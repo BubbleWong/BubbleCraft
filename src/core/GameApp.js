@@ -221,11 +221,11 @@ export class GameApp {
         if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) return;
         const evt = pointerInfo.event;
         if (evt.button === 0) {
-          console.log('[pointer] queue break');
+          // console.log('[pointer] queue break');
           this.blockInteraction?.queueBreak();
         } else if (evt.button === 2) {
           evt.preventDefault();
-          console.log('[pointer] queue place');
+          // console.log('[pointer] queue place');
       this.blockInteraction?.queuePlace();
         }
       });

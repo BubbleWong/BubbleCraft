@@ -45,9 +45,9 @@ export class BlockInteraction {
 
     const pickInfo = this._pickSolidBlock();
     this.currentTarget = pickInfo;
-    if ((this.breakRequested || this.placeRequested) && !pickInfo) {
-      console.log('[blockInteraction] pickInfo missing');
-    }
+    // if ((this.breakRequested || this.placeRequested) && !pickInfo) {
+    //   console.log('[blockInteraction] pickInfo missing');
+    // }
     this._updateHud(pickInfo);
 
     if (!pickInfo) {
@@ -89,9 +89,9 @@ export class BlockInteraction {
     this.camera.computeWorldMatrix?.(true);
     const forwardDir = this.camera.getDirection(BABYLON.Axis.Z).normalize();
     const forwardRay = new BABYLON.Ray(origin, forwardDir, MAX_INTERACT_DISTANCE);
-    if (this.breakRequested || this.placeRequested) {
-      console.log('[blockInteraction] ray', { origin: origin.asArray?.() ?? origin, dir: forwardDir.asArray?.() ?? forwardDir });
-    }
+    // if (this.breakRequested || this.placeRequested) {
+    //   console.log('[blockInteraction] ray', { origin: origin.asArray?.() ?? origin, dir: forwardDir.asArray?.() ?? forwardDir });
+    // }
     const pick = this.scene.pickWithRay(
       forwardRay,
       (mesh) => mesh?.metadata?.chunk && mesh.metadata.type === 'solid',
@@ -99,9 +99,9 @@ export class BlockInteraction {
     );
 
     if (!pick?.hit || !pick.pickedMesh?.metadata?.chunk) {
-      if (this.breakRequested || this.placeRequested) {
-        console.log('[blockInteraction] pick miss', pick);
-      }
+      // if (this.breakRequested || this.placeRequested) {
+      //   console.log('[blockInteraction] pick miss', pick);
+      // }
       return null;
     }
 
@@ -146,7 +146,7 @@ export class BlockInteraction {
     const worldZ = chunk.origin.z + blockZ;
 
     const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, BLOCK_TYPES.air);
-    console.log('[blockInteraction] break attempt', { worldX, worldY, worldZ, blockType, changed });
+    // console.log('[blockInteraction] break attempt', { worldX, worldY, worldZ, blockType, changed });
     if (!changed) return;
 
     if (this.inventory) {
@@ -192,7 +192,7 @@ export class BlockInteraction {
     }
 
     const placed = this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);
-    console.log('[blockInteraction] place attempt', { worldX, worldY, worldZ, placeType, placed });
+    // console.log('[blockInteraction] place attempt', { worldX, worldY, worldZ, placeType, placed });
     if (!placed) return;
 
     const removed = this.inventory.removeFromSlot(this.activeSlot, 1);

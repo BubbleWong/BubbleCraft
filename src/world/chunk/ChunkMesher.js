@@ -19,6 +19,7 @@ const FACE_DEFS = [
 
 const TRIANGLE_ORDER = [0, 2, 1, 0, 3, 2];
 const TRANSPARENT_BLOCKS = new Set([BLOCK_TYPES.air, BLOCK_TYPES.flower]);
+const COLLISION_EXCLUDED_BLOCKS = new Set([BLOCK_TYPES.flower, BLOCK_TYPES.water]);
 
 const WHITE_COLOR = [1, 1, 1];
 const BLACK_COLOR = [0, 0, 0];
@@ -80,6 +81,7 @@ export class ChunkMesher {
   buildGeometry(chunk) {
     const solid = { positions: [], normals: [], colors: [], uvs: [], indices: [] };
     const water = { positions: [], normals: [], colors: [], uvs: [], indices: [] };
+    const collision = { positions: [], normals: [], indices: [] };
 
     for (let y = 0; y < CHUNK_HEIGHT; y += 1) {
       for (let lz = 0; lz < CHUNK_SIZE; lz += 1) {
@@ -88,6 +90,7 @@ export class ChunkMesher {
           if (blockType === BLOCK_TYPES.air) continue;
 
           const target = blockType === BLOCK_TYPES.water ? water : solid;
+          const collidable = !COLLISION_EXCLUDED_BLOCKS.has(blockType);
           const worldX = chunk.origin.x + lx;
           const worldZ = chunk.origin.z + lz;
           if (blockType === BLOCK_TYPES.flower) {
@@ -107,6 +110,7 @@ export class ChunkMesher {
             const color = makeColor(baseColor, shade);
             const alpha = blockType === BLOCK_TYPES.water ? 0.68 : 1.0;
             const vertexBase = target.positions.length / 3;
+            const collisionBase = collision.positions.length / 3;
             const faceUV = this.atlas?.getBlockFaceUV(blockType, faceIndex, worldX, y, worldZ);
 
             for (let i = 0; i < 4; i += 1) {
@@ -120,10 +124,18 @@ export class ChunkMesher {
                 const [u, v] = this._getNeutralUV();
                 target.uvs.push(u, v);
               }
+
+              if (collidable) {
+                collision.positions.push(lx + corner[0], y + corner[1], lz + corner[2]);
+                collision.normals.push(face.dir[0], face.dir[1], face.dir[2]);
+              }
             }
 
             for (let i = 0; i < TRIANGLE_ORDER.length; i += 1) {
               target.indices.push(vertexBase + TRIANGLE_ORDER[i]);
+              if (collidable) {
+                collision.indices.push(collisionBase + TRIANGLE_ORDER[i]);
+              }
             }
           }
         }
@@ -132,6 +144,7 @@ export class ChunkMesher {
 
     return {
       solid: this._finalizeGeometry(solid),
+      collision: this._finalizeCollisionGeometry(collision),
       water: this._finalizeGeometry(water),
     };
   }
@@ -143,6 +156,15 @@ export class ChunkMesher {
       normals: new Float32Array(data.normals),
       colors: new Float32Array(data.colors),
       uvs: new Float32Array(data.uvs),
+      indices: new Uint32Array(data.indices),
+    };
+  }
+
+  _finalizeCollisionGeometry(data) {
+    if (data.positions.length === 0) return null;
+    return {
+      positions: new Float32Array(data.positions),
+      normals: new Float32Array(data.normals),
       indices: new Uint32Array(data.indices),
     };
   }

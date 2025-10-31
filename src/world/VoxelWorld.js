@@ -255,6 +255,16 @@ export class VoxelWorld {
       chunk.mesh = this._createMesh(`chunk-solid-${chunk.cx}-${chunk.cz}`, geometry.solid, this.solidMaterial, chunk, {
         pickable: true,
         type: 'solid',
+        receiveShadows: true,
+      });
+    }
+
+    if (geometry.collision) {
+      chunk.collisionMesh = this._createMesh(`chunk-collision-${chunk.cx}-${chunk.cz}`, geometry.collision, null, chunk, {
+        pickable: false,
+        type: 'collision',
+        collidable: true,
+        visible: false,
       });
     }
 
@@ -263,27 +273,37 @@ export class VoxelWorld {
         pickable: false,
         alphaIndex: 10,
         type: 'water',
+        receiveShadows: true,
       });
     }
   }
 
-  _createMesh(name, geometry, material, chunk, { pickable = true, alphaIndex = 0, type = 'solid' } = {}) {
+  _createMesh(name, geometry, material, chunk, {
+    pickable = true,
+    alphaIndex = 0,
+    type = 'solid',
+    collidable = false,
+    visible = true,
+    receiveShadows = false,
+  } = {}) {
     if (!this.scene || !geometry) return null;
     const mesh = new BABYLON.Mesh(name, this.scene);
     const vertexData = new BABYLON.VertexData();
     vertexData.positions = geometry.positions;
-    vertexData.normals = geometry.normals;
-    vertexData.colors = geometry.colors;
-    vertexData.uvs = geometry.uvs;
+    if (geometry.normals) vertexData.normals = geometry.normals;
+    if (geometry.colors) vertexData.colors = geometry.colors;
+    if (geometry.uvs) vertexData.uvs = geometry.uvs;
     vertexData.indices = geometry.indices;
     vertexData.applyToMesh(mesh, true);
     mesh.position.copyFrom(chunk.origin);
     mesh.material = material;
     mesh.isPickable = pickable;
     mesh.alphaIndex = alphaIndex;
-    mesh.receiveShadows = true;
+    mesh.receiveShadows = receiveShadows;
     mesh.metadata = { chunk, type };
-    mesh.checkCollisions = type === 'solid';
+    mesh.checkCollisions = collidable;
+    mesh.isVisible = visible;
+    mesh.visibility = visible ? 1 : 0;
     return mesh;
   }
 

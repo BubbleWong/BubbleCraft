@@ -8,6 +8,7 @@ export class Chunk {
     this.origin = new BABYLON.Vector3(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.mesh = null;
+    this.collisionMesh = null;
     this.waterMesh = null;
     this.counts = new Uint32Array((maxBlockType ?? BLOCK_TYPES.water) + 1);
   }
@@ -51,6 +52,11 @@ export class Chunk {
       this.mesh.material = null;
       this.mesh.dispose(false, false);
       this.mesh = null;
+    }
+    if (this.collisionMesh) {
+      this.collisionMesh.material = null;
+      this.collisionMesh.dispose(false, false);
+      this.collisionMesh = null;
     }
     if (this.waterMesh) {
       this.waterMesh.material = null;

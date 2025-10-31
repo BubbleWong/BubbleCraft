@@ -8,6 +8,9 @@ const TERMINAL_VELOCITY = -48;
 const CAPSULE_HEIGHT = 1.9;
 const CAPSULE_RADIUS = 0.42;
 const CAMERA_EYE_HEIGHT = 1.62;
+const CROUCH_HEIGHT = 1.3;
+const CROUCH_CAMERA_HEIGHT = 1.2;
+const CROUCH_SPEED_MULTIPLIER = 0.4;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
@@ -28,6 +31,13 @@ export class PlayerController {
     this.walkSpeed = DEFAULT_WALK_SPEED;
     this.sprintMultiplier = DEFAULT_SPRINT_MULTIPLIER;
     this.jumpImpulse = DEFAULT_JUMP_IMPULSE;
+    this.standHeight = CAPSULE_HEIGHT;
+    this.standCameraHeight = CAMERA_EYE_HEIGHT;
+    this.crouchHeight = CROUCH_HEIGHT;
+    this.crouchCameraHeight = CROUCH_CAMERA_HEIGHT;
+    this.crouchSpeedMultiplier = CROUCH_SPEED_MULTIPLIER;
+    this._currentHeight = CAPSULE_HEIGHT;
+    this._isCrouching = false;
 
     this.mesh = BABYLON.MeshBuilder.CreateCapsule('player-capsule', {
       height: CAPSULE_HEIGHT,
@@ -70,6 +80,7 @@ export class PlayerController {
     ];
     this._grounded = false;
     this._timeSinceGrounded = 0;
+    this._setColliderHeight(this.standHeight, this.standCameraHeight);
   }
 
   setSpawnPoint(position) {
@@ -78,6 +89,8 @@ export class PlayerController {
     this._velocity.setAll(0);
     this._grounded = false;
     this._timeSinceGrounded = 0;
+    this._isCrouching = false;
+    this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._snapToGround(true);
     if (this._isGrounded()) {
       this._grounded = true;
@@ -110,6 +123,8 @@ export class PlayerController {
     this._footstepAccumulator = 0;
     this._grounded = false;
     this._timeSinceGrounded = 0;
+    this._isCrouching = false;
+    this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._snapToGround(true);
     if (this._isGrounded()) {
       this._grounded = true;
@@ -133,12 +148,14 @@ export class PlayerController {
   }
 
   _integrateMovement(deltaSeconds, inputState) {
-    const { move, sprint, jump } = inputState;
+    const { move, sprint, jump, crouch } = inputState;
     const yaw = this.mesh.rotation.y;
     const sinYaw = Math.sin(yaw);
     const cosYaw = Math.cos(yaw);
 
     this._timeSinceGrounded += deltaSeconds;
+    const crouchActive = this._applyCrouchState(crouch);
+    const sprintActive = !crouchActive && sprint;
 
     const desired = this._desiredMove;
     desired.copyFromFloats(
@@ -149,7 +166,10 @@ export class PlayerController {
 
     if (desired.lengthSquared() > 1e-4) {
       desired.normalize();
-      desired.scaleInPlace(this.walkSpeed * (sprint ? this.sprintMultiplier : 1));
+      let moveSpeed = this.walkSpeed;
+      if (sprintActive) moveSpeed *= this.sprintMultiplier;
+      if (crouchActive) moveSpeed *= this.crouchSpeedMultiplier;
+      desired.scaleInPlace(moveSpeed);
     } else {
       desired.setAll(0);
     }
@@ -220,6 +240,71 @@ export class PlayerController {
     const limit = (maxRadius + 0.5) * CHUNK_SIZE;
     this.mesh.position.x = Math.max(-limit, Math.min(limit, this.mesh.position.x));
     this.mesh.position.z = Math.max(-limit, Math.min(limit, this.mesh.position.z));
+  }
+
+  _applyCrouchState(requestCrouch) {
+    const target = Boolean(requestCrouch);
+    if (target) {
+      if (!this._isCrouching) {
+        this._setColliderHeight(this.crouchHeight, this.crouchCameraHeight);
+        this._isCrouching = true;
+      }
+      return true;
+    }
+
+    if (!this._isCrouching) {
+      return false;
+    }
+
+    if (!this._hasHeadroom(this.standHeight)) {
+      return true;
+    }
+
+    this._setColliderHeight(this.standHeight, this.standCameraHeight);
+    this._isCrouching = false;
+    return false;
+  }
+
+  _setColliderHeight(height, eyeHeight) {
+    const halfHeight = height * 0.5;
+    if (this.mesh.ellipsoid?.y !== halfHeight) {
+      this.mesh.ellipsoid.y = halfHeight;
+    }
+    if (this.mesh.ellipsoidOffset?.y !== halfHeight) {
+      this.mesh.ellipsoidOffset.y = halfHeight;
+    }
+    if (this.camera?.position?.y !== eyeHeight) {
+      this.camera.position.y = eyeHeight;
+    }
+    this._currentHeight = height;
+  }
+
+  _hasHeadroom(targetHeight) {
+    if (!this.world?.getBlockAtWorld) return true;
+    if (!this._groundCheckOffsets) return true;
+    const footY = this.mesh.position.y;
+    const minCheckY = Math.floor(footY + this._currentHeight + COLLISION_EPSILON);
+    const maxCheckY = Math.floor(footY + targetHeight - COLLISION_EPSILON);
+    if (maxCheckY < minCheckY) return true;
+
+    for (const lateral of this._groundCheckOffsets) {
+      const sampleX = this.mesh.position.x + lateral.x;
+      const sampleZ = this.mesh.position.z + lateral.z;
+      const blockX = Math.floor(sampleX);
+      const blockZ = Math.floor(sampleZ);
+      for (let by = minCheckY; by <= maxCheckY; by += 1) {
+        const blockType = this.world.getBlockAtWorld(blockX, by, blockZ);
+        if (!this._isPassableBlock(blockType)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  _isPassableBlock(blockType) {
+    if (!Number.isFinite(blockType)) return true;
+    return blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
   }
 
   _isGrounded() {

@@ -246,7 +246,7 @@ export class VoxelWorld {
     return chunk;
   }
 
-  _buildChunkMeshes(chunk) {
+  _buildChunkMeshes(chunk, { skipNeighborRefresh = false } = {}) {
     if (!this.scene) return;
     const geometry = this.chunkMesher.buildGeometry(chunk);
     chunk.disposeMeshes();
@@ -275,6 +275,10 @@ export class VoxelWorld {
         type: 'water',
         receiveShadows: true,
       });
+    }
+
+    if (!skipNeighborRefresh) {
+      this._refreshNeighborMeshes(chunk);
     }
   }
 
@@ -321,7 +325,22 @@ export class VoxelWorld {
 
     for (const [ncx, ncz] of neighborSpecs) {
       const neighbor = this.getChunk(ncx, ncz);
-      if (neighbor) this._buildChunkMeshes(neighbor);
+      if (neighbor) this._buildChunkMeshes(neighbor, { skipNeighborRefresh: true });
+    }
+  }
+
+  _refreshNeighborMeshes(chunk) {
+    const neighbors = [
+      [chunk.cx + 1, chunk.cz],
+      [chunk.cx - 1, chunk.cz],
+      [chunk.cx, chunk.cz + 1],
+      [chunk.cx, chunk.cz - 1],
+    ];
+    for (const [cx, cz] of neighbors) {
+      const neighbor = this.getChunk(cx, cz);
+      if (neighbor) {
+        this._buildChunkMeshes(neighbor, { skipNeighborRefresh: true });
+      }
     }
   }
 

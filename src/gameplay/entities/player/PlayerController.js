@@ -20,6 +20,7 @@ const COYOTE_TIME = 0.12;
 const LEDGE_DROP_THRESHOLD = 0.18;
 const CROUCH_TRANSITION_SPEED = 12; // units per second
 const MAX_JUMP_ASCENT = 1.05;
+const SAFE_FALL_BLOCKS = 3;
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -86,8 +87,10 @@ export class PlayerController {
     this._grounded = false;
     this._timeSinceGrounded = 0;
     this._lastGroundFootY = 0;
+    this._fallStartFootY = 0;
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._lastGroundFootY = this._footY();
+    this._fallStartFootY = Math.floor(this._lastGroundFootY);
   }
 
   setSpawnPoint(position) {
@@ -106,6 +109,7 @@ export class PlayerController {
       this._timeSinceGrounded = 0;
     }
     this._lastGroundFootY = this._footY();
+    this._fallStartFootY = Math.floor(this._lastGroundFootY);
   }
 
   setOrientation({ yaw, pitch }) {
@@ -144,6 +148,7 @@ export class PlayerController {
       this._timeSinceGrounded = 0;
     }
     this._lastGroundFootY = this._footY();
+    this._fallStartFootY = Math.floor(this._lastGroundFootY);
     this.eventBus?.emit('player:respawn', { position: this.mesh.position.clone(), player: this });
   }
 
@@ -244,6 +249,7 @@ export class PlayerController {
     }
 
     this._previousPosition.copyFrom(this.mesh.position);
+    const previousFootY = this._footY(this._previousPosition);
     this.mesh.moveWithCollisions(delta);
     let postMoveFootY = this._footY();
     if (!this._grounded && postMoveFootY > maxAllowedFootY + COLLISION_EPSILON) {
@@ -276,6 +282,10 @@ export class PlayerController {
       groundedAfter = this._isGrounded();
     }
 
+    if (wasGrounded && !groundedAfter) {
+      this._fallStartFootY = Math.floor(previousFootY);
+    }
+
     if (groundedAfter) {
       if (this._velocity.y < 0) {
         this._velocity.y = 0;
@@ -284,7 +294,23 @@ export class PlayerController {
       this._actualMovement.y = this.mesh.position.y - this._previousPosition.y;
       this._grounded = true;
       this._timeSinceGrounded = 0;
-      this._lastGroundFootY = this._footY();
+      const landingFoot = this._footY();
+      this._lastGroundFootY = landingFoot;
+      const landingSurface = this.world?.getSurfaceHeight?.(this.mesh.position.x, this.mesh.position.z);
+      const landingSurfaceInt = Number.isFinite(landingSurface)
+        ? Math.floor(landingSurface)
+        : Math.floor(landingFoot);
+      if (!wasGrounded) {
+        const startFoot = Number.isFinite(this._fallStartFootY)
+          ? this._fallStartFootY
+          : landingSurfaceInt;
+        const fallDistance = Math.max(0, startFoot - landingSurfaceInt);
+        const damage = Math.max(0, fallDistance - SAFE_FALL_BLOCKS);
+        if (damage > 0) {
+          this._emitDamage({ amount: damage, cause: 'fall', fallDistance });
+        }
+      }
+      this._fallStartFootY = landingSurfaceInt;
     } else {
       this._grounded = false;
     }
@@ -307,6 +333,17 @@ export class PlayerController {
 
     const horizontalDistance = Math.hypot(this._actualMovement.x, this._actualMovement.z);
     this._handleFootsteps(this._grounded, horizontalDistance);
+  }
+
+  _emitDamage({ amount, cause = 'generic', fallDistance = 0 } = {}) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    this.eventBus?.emit('player:damage', {
+      amount,
+      cause,
+      fallDistance,
+      player: this,
+      position: this.mesh.position.clone(),
+    });
   }
 
   _clampToWorldBounds() {

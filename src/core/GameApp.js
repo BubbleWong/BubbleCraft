@@ -286,6 +286,9 @@ export class GameApp {
       this.eventBus.on('block:break', () => this._onInventoryChanged()),
       this.eventBus.on('block:place', () => this._onInventoryChanged()),
       this.eventBus.on('inventory:changed', () => this._onInventoryChanged()),
+      this.eventBus.on('player:damage', (payload) => {
+        this._applyDamage(payload?.amount ?? 0, payload ?? {});
+      }),
       this.eventBus.on('player:respawn', () => {
         this.currentHealth = this.maxHealth;
         this.hud?.updateHealth(this.currentHealth, this.maxHealth);
@@ -397,6 +400,25 @@ export class GameApp {
   _onInventoryChanged() {
     this._refreshInventoryUI();
     this._updateHudWorldInfo();
+  }
+
+  _applyDamage(amount, context = {}) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    this.currentHealth = Math.max(0, this.currentHealth - amount);
+    this.hud?.updateHealth(this.currentHealth, this.maxHealth);
+    if (this.currentHealth <= 0) {
+      this._handlePlayerDeath(context);
+    }
+  }
+
+  _handlePlayerDeath(context = {}) {
+    this.currentHealth = this.maxHealth;
+    this.hud?.updateHealth(this.currentHealth, this.maxHealth);
+    this.eventBus?.emit('player:death', {
+      ...context,
+      player: this.player,
+    });
+    this.player?.respawn();
   }
 
   _seedStarterInventory() {

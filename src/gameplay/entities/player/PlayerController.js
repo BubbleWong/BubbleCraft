@@ -10,13 +10,14 @@ const CAPSULE_RADIUS = 0.42;
 const CAMERA_EYE_HEIGHT = 1.62;
 const CROUCH_HEIGHT = 1.3;
 const CROUCH_CAMERA_HEIGHT = 1.2;
-const CROUCH_SPEED_MULTIPLIER = 0.4;
+const CROUCH_SPEED_MULTIPLIER = 0.3;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
 const GROUND_CHECK_OFFSET = 0.04;
 const COLLISION_EPSILON = 1e-3;
 const COYOTE_TIME = 0.12;
+const LEDGE_DROP_THRESHOLD = 0.18;
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -154,6 +155,7 @@ export class PlayerController {
     const cosYaw = Math.cos(yaw);
 
     this._timeSinceGrounded += deltaSeconds;
+    const wasGrounded = this._grounded;
     const crouchActive = this._applyCrouchState(crouch);
     const sprintActive = !crouchActive && sprint;
 
@@ -194,6 +196,20 @@ export class PlayerController {
     delta.copyFrom(this._velocity);
     delta.scaleInPlace(deltaSeconds);
 
+    const horizontalMove = Math.hypot(delta.x, delta.z);
+    if (crouchActive && this._grounded && horizontalMove > 1e-4) {
+      const predicted = this.mesh.position.clone();
+      predicted.x += delta.x;
+      predicted.z += delta.z;
+      const drop = this._measureGroundDistance(predicted);
+      if (drop > LEDGE_DROP_THRESHOLD) {
+        delta.x = 0;
+        delta.z = 0;
+        this._velocity.x = 0;
+        this._velocity.z = 0;
+      }
+    }
+
     this._previousPosition.copyFrom(this.mesh.position);
     this.mesh.moveWithCollisions(delta);
     this._clampToWorldBounds();
@@ -228,6 +244,22 @@ export class PlayerController {
       this._timeSinceGrounded = 0;
     } else {
       this._grounded = false;
+    }
+
+    const movedHorizontally = Math.abs(this._actualMovement.x) > 1e-4 || Math.abs(this._actualMovement.z) > 1e-4;
+    if (crouchActive && wasGrounded && movedHorizontally) {
+      const drop = this._measureGroundDistance(this.mesh.position);
+      if (drop > LEDGE_DROP_THRESHOLD) {
+        this.mesh.position.x = this._previousPosition.x;
+        this.mesh.position.z = this._previousPosition.z;
+        this._actualMovement.x = 0;
+        this._actualMovement.z = 0;
+        this._velocity.x = 0;
+        this._velocity.z = 0;
+        this._snapToGround(false);
+        this._grounded = true;
+        this._timeSinceGrounded = 0;
+      }
     }
 
     const horizontalDistance = Math.hypot(this._actualMovement.x, this._actualMovement.z);
@@ -280,19 +312,19 @@ export class PlayerController {
   }
 
   _hasHeadroom(targetHeight) {
-    if (!this.world?.getBlockAtWorld) return true;
-    if (!this._groundCheckOffsets) return true;
-    const footY = this.mesh.position.y;
-    const minCheckY = Math.floor(footY + this._currentHeight + COLLISION_EPSILON);
-    const maxCheckY = Math.floor(footY + targetHeight - COLLISION_EPSILON);
-    if (maxCheckY < minCheckY) return true;
+    if (!this.world?.getBlockAtWorld || !this._groundCheckOffsets) return true;
+    const extraHeight = targetHeight - this._currentHeight;
+    if (extraHeight <= COLLISION_EPSILON) return true;
+
+    const footY = this._footY();
+    const startY = Math.floor(footY + this._currentHeight + COLLISION_EPSILON);
+    const endY = Math.floor(footY + targetHeight - COLLISION_EPSILON);
+    if (endY < startY) return true;
 
     for (const lateral of this._groundCheckOffsets) {
-      const sampleX = this.mesh.position.x + lateral.x;
-      const sampleZ = this.mesh.position.z + lateral.z;
-      const blockX = Math.floor(sampleX);
-      const blockZ = Math.floor(sampleZ);
-      for (let by = minCheckY; by <= maxCheckY; by += 1) {
+      const blockX = Math.floor(this.mesh.position.x + lateral.x);
+      const blockZ = Math.floor(this.mesh.position.z + lateral.z);
+      for (let by = startY; by <= endY; by += 1) {
         const blockType = this.world.getBlockAtWorld(blockX, by, blockZ);
         if (!this._isPassableBlock(blockType)) {
           return false;
@@ -300,11 +332,6 @@ export class PlayerController {
       }
     }
     return true;
-  }
-
-  _isPassableBlock(blockType) {
-    if (!Number.isFinite(blockType)) return true;
-    return blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
   }
 
   _isGrounded() {
@@ -350,9 +377,7 @@ export class PlayerController {
   _sampleGroundBlock() {
     const worldX = Math.floor(this.mesh.position.x);
     const worldZ = Math.floor(this.mesh.position.z);
-    const offsetY = this.mesh.ellipsoidOffset?.y ?? CAPSULE_HEIGHT * 0.5;
-    const ellipsoidY = this.mesh.ellipsoid?.y ?? CAPSULE_HEIGHT * 0.5;
-    const footY = this.mesh.position.y + offsetY - ellipsoidY;
+    const footY = this._footY();
     const baseY = Math.floor(footY - 0.1);
     if (!this.world?.getBlockAtWorld) return BLOCK_TYPES.dirt;
     let blockType = this.world.getBlockAtWorld(worldX, baseY, worldZ);
@@ -361,6 +386,34 @@ export class PlayerController {
     }
     if (!Number.isFinite(blockType)) return BLOCK_TYPES.dirt;
     return blockType;
+  }
+
+  _footY(position = this.mesh.position) {
+    const ellipsoid = this.mesh.ellipsoid;
+    const offset = this.mesh.ellipsoidOffset;
+    const offsetY = offset?.y ?? this._currentHeight * 0.5;
+    const ellipsoidY = ellipsoid?.y ?? this._currentHeight * 0.5;
+    return position.y + offsetY - ellipsoidY;
+  }
+
+  _measureGroundDistance(position) {
+    if (!this.world?.getSurfaceHeight || !this._groundCheckOffsets) return Number.POSITIVE_INFINITY;
+    const footY = this._footY(position);
+    let minDrop = Number.POSITIVE_INFINITY;
+    for (const lateral of this._groundCheckOffsets) {
+      const surface = this.world.getSurfaceHeight(position.x + lateral.x, position.z + lateral.z);
+      if (!Number.isFinite(surface)) continue;
+      const drop = Math.max(0, footY - surface);
+      if (drop < minDrop) {
+        minDrop = drop;
+      }
+    }
+    return minDrop;
+  }
+
+  _isPassableBlock(blockType) {
+    if (!Number.isFinite(blockType)) return true;
+    return blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
   }
 
   _snapToGround(force = false) {

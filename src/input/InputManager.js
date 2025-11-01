@@ -17,7 +17,7 @@ const LOOK_KEY_BINDINGS = {
 const LOOK_SENSITIVITY = (Math.PI / 180) * 0.12; // radians per pixel
 const MAX_PITCH = (Math.PI / 2) * 0.96;
 const HOTBAR_SLOT_COUNT = 9;
-const SPRINT_DOUBLE_TAP_INTERVAL_MS = 280;
+const SPRINT_DOUBLE_TAP_INTERVAL_MS = 360;
 const KEY_LOOK_SPEED = (Math.PI / 180) * 120; // radians per second
 
 export class InputManager {
@@ -42,7 +42,7 @@ export class InputManager {
     this._sprintSources = new Set();
     this._crouchHold = false;
     this._crouchToggle = false;
-    this._lastForwardTapTime = 0;
+    this._lastForwardReleaseTime = 0;
     this._touchSprintPointers = new Set();
     this._pointerLocked = false;
     this._yaw = 0;
@@ -290,6 +290,7 @@ export class InputManager {
 
     if (KEY_BINDINGS.forward.has(event.code)) {
       this._setSprintSource('doubleTap', false);
+      this._lastForwardReleaseTime = this._now();
     }
 
     if (event.code.startsWith('Digit')) {
@@ -354,7 +355,7 @@ export class InputManager {
     this._touchSprintPointers.clear();
     this._clearSprintSources();
     this._updateCrouchIndicator();
-    this._lastForwardTapTime = 0;
+    this._lastForwardReleaseTime = 0;
     this._lastPollTime = this._now();
   }
 
@@ -419,7 +420,7 @@ export class InputManager {
     if (this._crouchHold === active) return;
     this._crouchHold = active;
     if (!active) {
-      this._lastForwardTapTime = 0;
+      this._lastForwardReleaseTime = 0;
     } else {
       this._clearSprintSources();
     }
@@ -478,11 +479,11 @@ export class InputManager {
   }
 
   _handleForwardTap() {
-    const now = performance.now();
-    if (this._pointerLocked && this._lastForwardTapTime && (now - this._lastForwardTapTime) <= SPRINT_DOUBLE_TAP_INTERVAL_MS) {
+    const now = this._now();
+    const lastRelease = this._lastForwardReleaseTime;
+    if (this._pointerLocked && lastRelease && (now - lastRelease) <= SPRINT_DOUBLE_TAP_INTERVAL_MS) {
       this._setSprintSource('doubleTap', true);
     }
-    this._lastForwardTapTime = now;
   }
 
   _bindTouchButtons() {

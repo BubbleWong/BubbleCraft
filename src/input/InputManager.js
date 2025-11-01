@@ -1,16 +1,24 @@
 const KEY_BINDINGS = {
-  forward: new Set(['KeyW', 'ArrowUp']),
-  backward: new Set(['KeyS', 'ArrowDown']),
-  left: new Set(['KeyA', 'ArrowLeft']),
-  right: new Set(['KeyD', 'ArrowRight']),
+  forward: new Set(['KeyW']),
+  backward: new Set(['KeyS']),
+  left: new Set(['KeyA']),
+  right: new Set(['KeyD']),
   jump: new Set(['Space']),
   crouch: new Set(['ShiftLeft', 'ShiftRight']),
+};
+
+const LOOK_KEY_BINDINGS = {
+  yawLeft: new Set(['ArrowLeft']),
+  yawRight: new Set(['ArrowRight']),
+  pitchUp: new Set(['ArrowUp']),
+  pitchDown: new Set(['ArrowDown']),
 };
 
 const LOOK_SENSITIVITY = (Math.PI / 180) * 0.12; // radians per pixel
 const MAX_PITCH = (Math.PI / 2) * 0.96;
 const HOTBAR_SLOT_COUNT = 9;
 const SPRINT_DOUBLE_TAP_INTERVAL_MS = 280;
+const KEY_LOOK_SPEED = (Math.PI / 180) * 120; // radians per second
 
 export class InputManager {
   constructor({ canvas, overlay, crosshair, onPointerLockChanged } = {}) {
@@ -22,6 +30,13 @@ export class InputManager {
     this._keys = new Set();
     this._moveAxis = { x: 0, y: 0 };
     this._lookDelta = { x: 0, y: 0 };
+    this._lookKeys = {
+      yawLeft: false,
+      yawRight: false,
+      pitchUp: false,
+      pitchDown: false,
+    };
+    this._keyLookAxis = { x: 0, y: 0 };
     this._jumpRequested = false;
     this._sprintActive = false;
     this._sprintSources = new Set();
@@ -37,6 +52,7 @@ export class InputManager {
     this._toggleHudDetailsRequested = false;
     this._touchSprintButton = null;
     this._touchCrouchButton = null;
+    this._lastPollTime = this._now();
 
     this._handleKeyDown = (event) => this._onKeyDown(event);
     this._handleKeyUp = (event) => this._onKeyUp(event);
@@ -136,7 +152,21 @@ export class InputManager {
     return this.getYawPitch();
   }
 
+  _now() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
   poll() {
+    const now = this._now();
+    let deltaSeconds = 0;
+    if (this._lastPollTime != null) {
+      deltaSeconds = Math.min(Math.max((now - this._lastPollTime) * 0.001, 0), 0.25);
+    }
+    this._lastPollTime = now;
+
     const move = { x: this._moveAxis.x, y: this._moveAxis.y };
     const look = { x: this._lookDelta.x, y: this._lookDelta.y };
     const jump = this._jumpRequested;
@@ -149,6 +179,15 @@ export class InputManager {
     if (look.x !== 0 || look.y !== 0) {
       this._yaw += look.x * LOOK_SENSITIVITY;
       this._pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this._pitch + look.y * LOOK_SENSITIVITY));
+    }
+
+    const keyLookX = this._keyLookAxis.x;
+    const keyLookY = this._keyLookAxis.y;
+    if (keyLookX !== 0 || keyLookY !== 0) {
+      const yawDelta = keyLookX * KEY_LOOK_SPEED * deltaSeconds;
+      const pitchDelta = keyLookY * KEY_LOOK_SPEED * deltaSeconds;
+      this._yaw += yawDelta;
+      this._pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this._pitch + pitchDelta));
     }
 
     this._lookDelta.x = 0;
@@ -185,11 +224,16 @@ export class InputManager {
   }
 
   _onKeyDown(event) {
-    if (!this._pointerLocked && !KEY_BINDINGS.jump.has(event.code)) return;
+    if (!this._pointerLocked && !KEY_BINDINGS.jump.has(event.code) && !this._isLookKey(event.code)) return;
 
     if (event.repeat) return;
     this._keys.add(event.code);
     this._updateAxes();
+
+    const handledLook = this._setLookKeyFromCode(event.code, true);
+    if (handledLook) {
+      event.preventDefault();
+    }
 
     if (KEY_BINDINGS.jump.has(event.code)) {
       event.preventDefault();
@@ -234,6 +278,11 @@ export class InputManager {
   _onKeyUp(event) {
     this._keys.delete(event.code);
     this._updateAxes();
+
+    const handledLook = this._setLookKeyFromCode(event.code, false);
+    if (handledLook) {
+      event.preventDefault();
+    }
 
     if (KEY_BINDINGS.crouch.has(event.code)) {
       this._setCrouchHold(false);
@@ -295,11 +344,18 @@ export class InputManager {
       this._keys.clear();
       this._updateAxes();
     }
+    this._lookKeys.yawLeft = false;
+    this._lookKeys.yawRight = false;
+    this._lookKeys.pitchUp = false;
+    this._lookKeys.pitchDown = false;
+    this._keyLookAxis.x = 0;
+    this._keyLookAxis.y = 0;
     this._crouchHold = false;
     this._touchSprintPointers.clear();
     this._clearSprintSources();
     this._updateCrouchIndicator();
     this._lastForwardTapTime = 0;
+    this._lastPollTime = this._now();
   }
 
   _onPointerLockError() {
@@ -313,6 +369,40 @@ export class InputManager {
     if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
     event.preventDefault();
     this.requestPointerLock({ source: 'overlay' });
+  }
+
+  _isLookKey(code) {
+    return LOOK_KEY_BINDINGS.yawLeft.has(code) ||
+      LOOK_KEY_BINDINGS.yawRight.has(code) ||
+      LOOK_KEY_BINDINGS.pitchUp.has(code) ||
+      LOOK_KEY_BINDINGS.pitchDown.has(code);
+  }
+
+  _setLookKeyFromCode(code, active) {
+    let matched = false;
+    if (LOOK_KEY_BINDINGS.yawLeft.has(code)) {
+      this._lookKeys.yawLeft = active;
+      matched = true;
+    } else if (LOOK_KEY_BINDINGS.yawRight.has(code)) {
+      this._lookKeys.yawRight = active;
+      matched = true;
+    } else if (LOOK_KEY_BINDINGS.pitchUp.has(code)) {
+      this._lookKeys.pitchUp = active;
+      matched = true;
+    } else if (LOOK_KEY_BINDINGS.pitchDown.has(code)) {
+      this._lookKeys.pitchDown = active;
+      matched = true;
+    }
+
+    if (matched) {
+      this._recomputeKeyLookAxis();
+    }
+    return matched;
+  }
+
+  _recomputeKeyLookAxis() {
+    this._keyLookAxis.x = (this._lookKeys.yawRight ? 1 : 0) - (this._lookKeys.yawLeft ? 1 : 0);
+    this._keyLookAxis.y = (this._lookKeys.pitchDown ? 1 : 0) - (this._lookKeys.pitchUp ? 1 : 0);
   }
 
   _setHotbarIndex(index) {

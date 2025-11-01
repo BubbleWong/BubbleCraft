@@ -8,7 +8,7 @@ import { WeatherSystem } from '../gameplay/systems/WeatherSystem.js';
 import { GameContext } from './GameContext.js';
 import { EventBus } from './services/EventBus.js';
 import { SoundManager } from '../gameplay/audio/SoundManager.js';
-import { BLOCK_TYPES, INITIAL_WORLD_RADIUS, EXTENDED_WORLD_RADIUS } from '../constants.js';
+import { INITIAL_WORLD_RADIUS, EXTENDED_WORLD_RADIUS } from '../constants.js';
 
 const { PointerEventTypes } = BABYLON;
 
@@ -134,7 +134,6 @@ export class GameApp {
     });
 
     window.addEventListener('resize', () => this.engine?.resize());
-    window.addEventListener('wheel', this._onWheel, { passive: false });
   }
 
   dispose() {
@@ -401,21 +400,7 @@ export class GameApp {
   }
 
   _seedStarterInventory() {
-    if (!this.inventory) return;
-    const starter = [
-      { type: BLOCK_TYPES.grass, count: 32 },
-      { type: BLOCK_TYPES.dirt, count: 48 },
-      { type: BLOCK_TYPES.stone, count: 48 },
-      { type: BLOCK_TYPES.wood, count: 32 },
-      { type: BLOCK_TYPES.sand, count: 24 },
-      { type: BLOCK_TYPES.leaves, count: 16 },
-      { type: BLOCK_TYPES.gold, count: 12 },
-      { type: BLOCK_TYPES.diamond, count: 8 },
-      { type: BLOCK_TYPES.flower, count: 12 },
-    ];
-    starter.forEach(({ type, count }) => {
-      this.inventory.add(type, count);
-    });
+    // Starter kits removed: players begin with an empty inventory.
   }
 
   _refreshInventoryUI(direction = 1) {
@@ -442,11 +427,8 @@ export class GameApp {
     this._refreshInventoryUI();
   }
 
-  _handleWheel(event) {
-    if (!this.input?.isPointerLocked?.()) return;
-    if (this._handleInventoryWheel(event.deltaY)) {
-      event.preventDefault();
-    }
+  _handleWheel() {
+    // Hotbar scrolling via mouse wheel has been disabled.
   }
 
   _handleInventoryWheel(deltaY) {

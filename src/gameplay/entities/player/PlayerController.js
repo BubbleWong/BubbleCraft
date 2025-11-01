@@ -2,7 +2,7 @@ import { CHUNK_SIZE, BLOCK_TYPES } from '../../../constants.js';
 
 const DEFAULT_WALK_SPEED = 5.5;
 const DEFAULT_SPRINT_MULTIPLIER = 1.65;
-const DEFAULT_JUMP_IMPULSE = 8.15; // ≈1.5 block apex with GRAVITY
+const DEFAULT_JUMP_IMPULSE = 6.8; // ≈1.0 block apex with GRAVITY
 const GRAVITY = -22;
 const TERMINAL_VELOCITY = -48;
 const CAPSULE_HEIGHT = 1.9;
@@ -19,6 +19,7 @@ const COLLISION_EPSILON = 1e-3;
 const COYOTE_TIME = 0.12;
 const LEDGE_DROP_THRESHOLD = 0.18;
 const CROUCH_TRANSITION_SPEED = 12; // units per second
+const MAX_JUMP_ASCENT = 1.05;
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -84,7 +85,9 @@ export class PlayerController {
     ];
     this._grounded = false;
     this._timeSinceGrounded = 0;
+    this._lastGroundFootY = 0;
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
+    this._lastGroundFootY = this._footY();
   }
 
   setSpawnPoint(position) {
@@ -102,6 +105,7 @@ export class PlayerController {
       this._grounded = true;
       this._timeSinceGrounded = 0;
     }
+    this._lastGroundFootY = this._footY();
   }
 
   setOrientation({ yaw, pitch }) {
@@ -139,6 +143,7 @@ export class PlayerController {
       this._grounded = true;
       this._timeSinceGrounded = 0;
     }
+    this._lastGroundFootY = this._footY();
     this.eventBus?.emit('player:respawn', { position: this.mesh.position.clone(), player: this });
   }
 
@@ -189,6 +194,7 @@ export class PlayerController {
 
     const canJump = jump && this._timeSinceGrounded <= COYOTE_TIME;
     if (canJump) {
+      this._lastGroundFootY = this._footY();
       this._velocity.y = this.jumpImpulse;
       this._grounded = false;
       this._timeSinceGrounded = COYOTE_TIME + deltaSeconds;
@@ -200,9 +206,28 @@ export class PlayerController {
       }
     }
 
+    const baseFootY = this._footY();
+    const maxAllowedFootY = this._lastGroundFootY + MAX_JUMP_ASCENT;
+
     const delta = this._movementDelta;
     delta.copyFrom(this._velocity);
     delta.scaleInPlace(deltaSeconds);
+
+    if (!this._grounded && this._velocity.y > 0 && baseFootY < maxAllowedFootY) {
+      const projectedFootY = baseFootY + delta.y;
+      if (projectedFootY > maxAllowedFootY) {
+        const excess = projectedFootY - maxAllowedFootY;
+        delta.y -= excess;
+        if (delta.y < 0) {
+          delta.y = 0;
+        }
+        if (deltaSeconds > 0) {
+          this._velocity.y = Math.max(0, delta.y / deltaSeconds);
+        } else {
+          this._velocity.y = 0;
+        }
+      }
+    }
 
     const horizontalMove = Math.hypot(delta.x, delta.z);
     if (crouchActive && this._grounded && horizontalMove > 1e-4) {
@@ -220,6 +245,15 @@ export class PlayerController {
 
     this._previousPosition.copyFrom(this.mesh.position);
     this.mesh.moveWithCollisions(delta);
+    let postMoveFootY = this._footY();
+    if (!this._grounded && postMoveFootY > maxAllowedFootY + COLLISION_EPSILON) {
+      const correction = postMoveFootY - (maxAllowedFootY + COLLISION_EPSILON);
+      this.mesh.position.y -= correction;
+      postMoveFootY = this._footY();
+      if (this._velocity.y > 0) {
+        this._velocity.y = 0;
+      }
+    }
     this._clampToWorldBounds();
 
     this._actualMovement.copyFrom(this.mesh.position);
@@ -250,6 +284,7 @@ export class PlayerController {
       this._actualMovement.y = this.mesh.position.y - this._previousPosition.y;
       this._grounded = true;
       this._timeSinceGrounded = 0;
+      this._lastGroundFootY = this._footY();
     } else {
       this._grounded = false;
     }

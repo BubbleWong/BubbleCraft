@@ -18,6 +18,7 @@ const GROUND_CHECK_OFFSET = 0.04;
 const COLLISION_EPSILON = 1e-3;
 const COYOTE_TIME = 0.12;
 const LEDGE_DROP_THRESHOLD = 0.18;
+const CROUCH_TRANSITION_SPEED = 12; // units per second
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -39,6 +40,8 @@ export class PlayerController {
     this.crouchSpeedMultiplier = CROUCH_SPEED_MULTIPLIER;
     this._currentHeight = CAPSULE_HEIGHT;
     this._isCrouching = false;
+    this._targetHeight = CAPSULE_HEIGHT;
+    this._targetCameraHeight = CAMERA_EYE_HEIGHT;
 
     this.mesh = BABYLON.MeshBuilder.CreateCapsule('player-capsule', {
       height: CAPSULE_HEIGHT,
@@ -91,6 +94,8 @@ export class PlayerController {
     this._grounded = false;
     this._timeSinceGrounded = 0;
     this._isCrouching = false;
+    this._targetHeight = this.standHeight;
+    this._targetCameraHeight = this.standCameraHeight;
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._snapToGround(true);
     if (this._isGrounded()) {
@@ -111,6 +116,7 @@ export class PlayerController {
   update(deltaSeconds, frameInput = null) {
     const inputState = frameInput ?? this.input.poll();
     this._applyCameraOrientation(inputState.look);
+    this._updateCrouchTransition(deltaSeconds);
     this._integrateMovement(deltaSeconds, inputState);
 
     if (this.mesh.position.y < -64) {
@@ -125,6 +131,8 @@ export class PlayerController {
     this._grounded = false;
     this._timeSinceGrounded = 0;
     this._isCrouching = false;
+    this._targetHeight = this.standHeight;
+    this._targetCameraHeight = this.standCameraHeight;
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._snapToGround(true);
     if (this._isGrounded()) {
@@ -278,7 +286,8 @@ export class PlayerController {
     const target = Boolean(requestCrouch);
     if (target) {
       if (!this._isCrouching) {
-        this._setColliderHeight(this.crouchHeight, this.crouchCameraHeight);
+        this._targetHeight = this.crouchHeight;
+        this._targetCameraHeight = this.crouchCameraHeight;
         this._isCrouching = true;
       }
       return true;
@@ -292,22 +301,17 @@ export class PlayerController {
       return true;
     }
 
-    this._setColliderHeight(this.standHeight, this.standCameraHeight);
+    this._targetHeight = this.standHeight;
+    this._targetCameraHeight = this.standCameraHeight;
     this._isCrouching = false;
     return false;
   }
 
   _setColliderHeight(height, eyeHeight) {
     const halfHeight = height * 0.5;
-    if (this.mesh.ellipsoid?.y !== halfHeight) {
-      this.mesh.ellipsoid.y = halfHeight;
-    }
-    if (this.mesh.ellipsoidOffset?.y !== halfHeight) {
-      this.mesh.ellipsoidOffset.y = halfHeight;
-    }
-    if (this.camera?.position?.y !== eyeHeight) {
-      this.camera.position.y = eyeHeight;
-    }
+    this.mesh.ellipsoid.y = halfHeight;
+    this.mesh.ellipsoidOffset.y = halfHeight;
+    this.camera.position.y = eyeHeight;
     this._currentHeight = height;
   }
 
@@ -391,9 +395,26 @@ export class PlayerController {
   _footY(position = this.mesh.position) {
     const ellipsoid = this.mesh.ellipsoid;
     const offset = this.mesh.ellipsoidOffset;
-    const offsetY = offset?.y ?? this._currentHeight * 0.5;
-    const ellipsoidY = ellipsoid?.y ?? this._currentHeight * 0.5;
+    const offsetY = offset?.y ?? (this._currentHeight * 0.5);
+    const ellipsoidY = ellipsoid?.y ?? (this._currentHeight * 0.5);
     return position.y + offsetY - ellipsoidY;
+  }
+
+  _updateCrouchTransition(deltaSeconds) {
+    const heightDiff = this._targetHeight - this._currentHeight;
+    if (Math.abs(heightDiff) < 1e-3) {
+      this._setColliderHeight(this._targetHeight, this._targetCameraHeight);
+      return;
+    }
+
+    const maxStep = CROUCH_TRANSITION_SPEED * deltaSeconds;
+    const applied = Math.abs(heightDiff) <= maxStep ? heightDiff : Math.sign(heightDiff) * maxStep;
+    const nextHeight = this._currentHeight + applied;
+    const cameraDiff = this._targetCameraHeight - this.camera.position.y;
+    const cameraApplied = Math.abs(cameraDiff) <= maxStep ? cameraDiff : Math.sign(cameraDiff) * maxStep;
+    const nextCamera = this.camera.position.y + cameraApplied;
+
+    this._setColliderHeight(nextHeight, nextCamera);
   }
 
   _measureGroundDistance(position) {

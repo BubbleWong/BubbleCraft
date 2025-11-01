@@ -50,6 +50,7 @@ export class VoxelWorld {
       random3D: this.random3D.bind(this),
       atlas: this.blockAtlas,
     });
+    this._meshRebuildQueue = new Set();
 
     this._spawnPoint = new BABYLON.Vector3(0, SEA_LEVEL + 4, 0);
 
@@ -126,6 +127,7 @@ export class VoxelWorld {
     this.blockAtlas?.dispose?.();
     this.blockAtlas = null;
     this.chunkMesher = null;
+    this._meshRebuildQueue.clear();
   }
 
   getSpawnPoint() {
@@ -141,6 +143,7 @@ export class VoxelWorld {
       this._scheduleExpansion(position);
     }
     this._pumpGenerationQueue();
+    this._processMeshRebuildQueue(2);
   }
 
   sampleTerrainHeight(x, z) {
@@ -246,7 +249,7 @@ export class VoxelWorld {
     return chunk;
   }
 
-  _buildChunkMeshes(chunk, { skipNeighborRefresh = false } = {}) {
+  _buildChunkMeshes(chunk, { notifyNeighbors = true } = {}) {
     if (!this.scene) return;
     const geometry = this.chunkMesher.buildGeometry(chunk);
     chunk.disposeMeshes();
@@ -277,8 +280,8 @@ export class VoxelWorld {
       });
     }
 
-    if (!skipNeighborRefresh) {
-      this._refreshNeighborMeshes(chunk);
+    if (notifyNeighbors) {
+      this._queueNeighborMeshRefresh(chunk);
     }
   }
 
@@ -313,6 +316,7 @@ export class VoxelWorld {
 
   _disposeChunk(chunk) {
     this._applyChunkCounts(chunk, -1);
+    this._meshRebuildQueue.delete(chunk);
     chunk.disposeMeshes();
   }
 
@@ -325,11 +329,11 @@ export class VoxelWorld {
 
     for (const [ncx, ncz] of neighborSpecs) {
       const neighbor = this.getChunk(ncx, ncz);
-      if (neighbor) this._buildChunkMeshes(neighbor, { skipNeighborRefresh: true });
+      if (neighbor) this._queueChunkMeshRebuild(neighbor);
     }
   }
 
-  _refreshNeighborMeshes(chunk) {
+  _queueNeighborMeshRefresh(chunk) {
     const neighbors = [
       [chunk.cx + 1, chunk.cz],
       [chunk.cx - 1, chunk.cz],
@@ -339,8 +343,25 @@ export class VoxelWorld {
     for (const [cx, cz] of neighbors) {
       const neighbor = this.getChunk(cx, cz);
       if (neighbor) {
-        this._buildChunkMeshes(neighbor, { skipNeighborRefresh: true });
+        this._queueChunkMeshRebuild(neighbor);
       }
+    }
+  }
+
+  _queueChunkMeshRebuild(chunk) {
+    if (!chunk) return;
+    this._meshRebuildQueue.add(chunk);
+  }
+
+  _processMeshRebuildQueue(limit = 1) {
+    if (this._meshRebuildQueue.size === 0 || limit <= 0) return;
+    for (let processed = 0; processed < limit; processed += 1) {
+      const iterator = this._meshRebuildQueue.values().next();
+      if (iterator.done) break;
+      const chunk = iterator.value;
+      this._meshRebuildQueue.delete(chunk);
+      if (!this.chunks.has(chunkKey(chunk.cx, chunk.cz))) continue;
+      this._buildChunkMeshes(chunk, { notifyNeighbors: false });
     }
   }
 

@@ -156,8 +156,9 @@ export class BlockAtlas {
       diamondBright: hexToRgb('#9feefe'),
       diamondMid: hexToRgb('#71d6f2'),
       diamondStone: hexToRgb('#506273'),
-      waterShallow: hexToRgb('#348bdb'),
-      waterDeep: hexToRgb('#1c3f85'),
+      waterShallow: hexToRgb('#8ac3ff'),
+      waterDeep: hexToRgb('#69a8f2'),
+      waterFlat: hexToRgb('#9bd0ff'),
       mudBase: hexToRgb('#4f362c'),
       mudDark: hexToRgb('#332019'),
       neutralSoft: hexToRgb('#bfc3c8'),
@@ -400,12 +401,8 @@ export class BlockAtlas {
     return color;
   }
 
-  _paintWater(x, y, variant = 0) {
-    const t = y / this.tileSize;
-    let color = mixColors(this.palette.waterShallow, this.palette.waterDeep, this._smoothstep(0, 1, t));
-    const wave = Math.sin((y / this.tileSize) * TAU * (1.2 + variant * 0.1) + Math.sin((x / this.tileSize) * TAU * (2 + variant * 0.15)) * 0.8);
-    color = mixColors(color, wave > 0 ? lighten(color, wave * 0.15) : darken(color, -wave * 0.1), 0.4);
-    return color;
+  _paintWater() {
+    return [...this.palette.waterFlat];
   }
 
   _paintMud(x, y, variant = 0) {

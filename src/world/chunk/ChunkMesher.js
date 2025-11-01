@@ -106,9 +106,9 @@ export class ChunkMesher {
               (neighbor === BLOCK_TYPES.water && blockType !== BLOCK_TYPES.water);
             if (!transparentNeighbor) continue;
 
-            const shade = blockType === BLOCK_TYPES.water ? 0.95 : face.shade;
+            const shade = blockType === BLOCK_TYPES.water ? 1.0 : face.shade;
             const color = makeColor(baseColor, shade);
-            const alpha = blockType === BLOCK_TYPES.water ? 0.68 : 1.0;
+            const alpha = blockType === BLOCK_TYPES.water ? 0.45 : 1.0;
             const vertexBase = target.positions.length / 3;
             const collisionBase = collision.positions.length / 3;
             const faceUV = this.atlas?.getBlockFaceUV(blockType, faceIndex, worldX, y, worldZ);

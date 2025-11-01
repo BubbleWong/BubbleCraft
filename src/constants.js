@@ -50,7 +50,7 @@ export const BLOCK_COLORS = {
   [BLOCK_TYPES.gold]: [0.97, 0.83, 0.36],
   [BLOCK_TYPES.diamond]: [0.53, 0.84, 0.92],
   [BLOCK_TYPES.flower]: [0.95, 0.66, 0.84],
-  [BLOCK_TYPES.water]: [0.18, 0.45, 0.82],
+  [BLOCK_TYPES.water]: [0.58, 0.78, 0.95],
 };
 
 export const SEA_LEVEL = 20;

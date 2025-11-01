@@ -1,6 +1,6 @@
 # BubbleCraft
 This project is aiming to make a light-weight, instant playable, online, Minecraft-like sandbox game.
 
-![Screenshot 2025-10-08 at 9 01 50 PM (2)](https://github.com/user-attachments/assets/38d8122b-466f-46ab-839e-50a390ee23cb)
+<img width="1217" height="961" alt="Screenshot 2025-11-01 at 12 52 22 AM" src="https://github.com/user-attachments/assets/c6675eba-dee2-4762-a021-2d827104f45d" />
 
 Try it now at this URL: https://bubblewong.github.io/BubbleCraft/

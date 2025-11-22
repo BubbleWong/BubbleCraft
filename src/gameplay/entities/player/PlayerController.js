@@ -57,6 +57,14 @@ export class PlayerController {
     const ellipsoidY = CAPSULE_HEIGHT * 0.5;
     this.mesh.ellipsoid = new BABYLON.Vector3(CAPSULE_RADIUS, ellipsoidY, CAPSULE_RADIUS);
     this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, ellipsoidY, 0);
+    
+    // Prevent wall friction/sticking
+    this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+        this.mesh, 
+        BABYLON.PhysicsImpostor.CapsuleImpostor, 
+        { mass: 1, friction: 0, restitution: 0 }, 
+        this.scene
+    );
 
     this.camera.parent = this.mesh;
     this.camera.position.set(0, CAMERA_EYE_HEIGHT, 0);

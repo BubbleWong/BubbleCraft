@@ -187,10 +187,17 @@ export class BlockInteraction {
     const playerPos = this.player?.mesh?.position;
     if (!playerPos) return;
     const dx = Math.abs(worldX + 0.5 - playerPos.x);
-    const dy = Math.abs(worldY + 0.5 - playerPos.y);
     const dz = Math.abs(worldZ + 0.5 - playerPos.z);
-    if (dx <= 0.6 && dz <= 0.6 && dy <= 1.3) {
-      return;
+
+    if (dx <= 0.6 && dz <= 0.6) {
+      const playerBottom = playerPos.y;
+      const playerTop = playerPos.y + 1.85; // Slightly less than 1.9 for leniency
+      const blockBottom = worldY;
+      const blockTop = worldY + 1.0;
+
+      if (playerBottom < blockTop && playerTop > blockBottom) {
+        return;
+      }
     }
 
     const placed = this.world.setBlockAtWorld(worldX, worldY, worldZ, placeType);

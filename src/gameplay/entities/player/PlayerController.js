@@ -2,7 +2,7 @@ import { CHUNK_SIZE, BLOCK_TYPES } from '../../../constants.js';
 
 const DEFAULT_WALK_SPEED = 5.5;
 const DEFAULT_SPRINT_MULTIPLIER = 1.65;
-const DEFAULT_JUMP_IMPULSE = 6.8; // ≈1.0 block apex with GRAVITY
+const DEFAULT_JUMP_IMPULSE = 7.7; // ≈1.35 block apex with GRAVITY
 const GRAVITY = -22;
 const TERMINAL_VELOCITY = -48;
 const CAPSULE_HEIGHT = 1.9;
@@ -19,7 +19,7 @@ const COLLISION_EPSILON = 1e-3;
 const COYOTE_TIME = 0.12;
 const LEDGE_DROP_THRESHOLD = 0.18;
 const CROUCH_TRANSITION_SPEED = 12; // units per second
-const MAX_JUMP_ASCENT = 1.05;
+const MAX_JUMP_ASCENT = 1.4;
 const SAFE_FALL_BLOCKS = 3;
 
 export class PlayerController {

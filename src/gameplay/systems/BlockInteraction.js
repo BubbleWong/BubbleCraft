@@ -36,13 +36,21 @@ export class BlockInteraction {
 
   update(frameInput) {
     const pointerLocked = Boolean(frameInput?.pointerLocked);
-    if (!pointerLocked) {
+    const usingGamepad = Boolean(frameInput?.usingGamepad);
+    const gamepadAction = frameInput?.actions;
+    
+    // Allow interaction if pointer is locked OR if a gamepad is active
+    if (!pointerLocked && !usingGamepad) {
       this.currentTarget = null;
       this.breakRequested = false;
       this.placeRequested = false;
       this._updateHud(null);
       return;
     }
+
+    // Process gamepad actions
+    if (gamepadAction?.break) this.queueBreak();
+    if (gamepadAction?.place) this.queuePlace();
 
     const pickInfo = this._pickSolidBlock();
     this.currentTarget = pickInfo;

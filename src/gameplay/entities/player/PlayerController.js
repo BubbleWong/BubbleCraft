@@ -185,8 +185,9 @@ export class PlayerController {
     );
 
     if (desired.lengthSquared() > 1e-4) {
+      const inputMagnitude = Math.min(1.0, desired.length());
       desired.normalize();
-      let moveSpeed = this.walkSpeed;
+      let moveSpeed = this.walkSpeed * inputMagnitude;
       if (sprintActive) moveSpeed *= this.sprintMultiplier;
       if (crouchActive) moveSpeed *= this.crouchSpeedMultiplier;
       desired.scaleInPlace(moveSpeed);

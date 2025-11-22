@@ -20,6 +20,27 @@ const HOTBAR_SLOT_COUNT = 9;
 const SPRINT_DOUBLE_TAP_INTERVAL_MS = 360;
 const KEY_LOOK_SPEED = (Math.PI / 180) * 120; // radians per second
 
+const GAMEPAD_DEADZONE = 0.08;
+const GAMEPAD_LOOK_SPEED = 5.5; // Multiplier for look
+const GAMEPAD_BUTTONS = {
+  A: 0,
+  B: 1,
+  X: 2,
+  Y: 3,
+  LB: 4,
+  RB: 5,
+  LT: 6,
+  RT: 7,
+  BACK: 8,
+  START: 9,
+  L3: 10,
+  R3: 11,
+  UP: 12,
+  DOWN: 13,
+  LEFT: 14,
+  RIGHT: 15,
+};
+
 export class InputManager {
   constructor({ canvas, overlay, crosshair, onPointerLockChanged } = {}) {
     this.canvas = canvas;
@@ -53,6 +74,9 @@ export class InputManager {
     this._touchSprintButton = null;
     this._touchCrouchButton = null;
     this._lastPollTime = this._now();
+    this._prevGamepadButtons = new Array(16).fill(false);
+    this._gamepadActionState = { break: false, place: false };
+    this._gamepadMove = { x: 0, y: 0 };
 
     this._handleKeyDown = (event) => this._onKeyDown(event);
     this._handleKeyUp = (event) => this._onKeyUp(event);
@@ -167,7 +191,17 @@ export class InputManager {
     }
     this._lastPollTime = now;
 
-    const move = { x: this._moveAxis.x, y: this._moveAxis.y };
+    this._pollGamepad(deltaSeconds);
+
+    // Combine keyboard and gamepad movement
+    const moveX = this._moveAxis.x + this._gamepadMove.x;
+    const moveY = this._moveAxis.y + this._gamepadMove.y;
+
+    // Clamp combined movement to max length 1.0
+    const moveLenSq = moveX * moveX + moveY * moveY;
+    const scale = moveLenSq > 1 ? 1 / Math.sqrt(moveLenSq) : 1;
+    
+    const move = { x: moveX * scale, y: moveY * scale };
     const look = { x: this._lookDelta.x, y: this._lookDelta.y };
     const jump = this._jumpRequested;
     const crouch = this._isCrouchActive();
@@ -194,6 +228,10 @@ export class InputManager {
     this._lookDelta.y = 0;
     this._jumpRequested = false;
 
+    const actions = { ...this._gamepadActionState };
+    this._gamepadActionState.break = false;
+    this._gamepadActionState.place = false;
+
     return {
       move,
       look: { yaw: this._yaw, pitch: this._pitch },
@@ -201,10 +239,88 @@ export class InputManager {
       crouch,
       sprint,
       pointerLocked: this._pointerLocked,
+      usingGamepad: this._usingGamepad,
       hotbarIndex: this._hotbarIndex,
       hotbarChanged: this._consumeHotbarDirty(),
       toggleHudDetails: this._consumeToggleHudDetails(),
+      actions,
     };
+  }
+
+  _pollGamepad(deltaSeconds) {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) {
+        this._usingGamepad = false;
+        return;
+    }
+
+    const gamepads = navigator.getGamepads();
+    const gamepad = gamepads[0]; // Use the first connected gamepad
+    this._usingGamepad = !!gamepad;
+
+    if (!gamepad) return;
+
+    // Axes
+    const leftX = Math.abs(gamepad.axes[0]) > GAMEPAD_DEADZONE ? gamepad.axes[0] : 0;
+    const leftY = Math.abs(gamepad.axes[1]) > GAMEPAD_DEADZONE ? gamepad.axes[1] : 0;
+    const rightX = Math.abs(gamepad.axes[2]) > GAMEPAD_DEADZONE ? gamepad.axes[2] : 0;
+    const rightY = Math.abs(gamepad.axes[3]) > GAMEPAD_DEADZONE ? gamepad.axes[3] : 0;
+
+    // Update gamepad move vector directly (always update to allow returning to 0)
+    this._gamepadMove.x = leftX;
+    this._gamepadMove.y = -leftY; // Invert Y for standard forward/back
+
+    // Apply look directly to yaw/pitch (scaled) with squared curve for precision
+    if (rightX !== 0 || rightY !== 0) {
+      const yawDelta = (rightX * Math.abs(rightX)) * GAMEPAD_LOOK_SPEED * deltaSeconds;
+      const pitchDelta = (rightY * Math.abs(rightY)) * GAMEPAD_LOOK_SPEED * deltaSeconds;
+      
+      this._yaw += yawDelta;
+      this._pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this._pitch + pitchDelta));
+    }
+
+
+    // Buttons
+    const buttons = gamepad.buttons;
+    const pressed = (idx) => buttons[idx] && (typeof buttons[idx] === 'object' ? buttons[idx].pressed : buttons[idx] === 1.0);
+    
+    // Jump (A)
+    if (pressed(GAMEPAD_BUTTONS.A)) {
+      this._jumpRequested = true;
+    }
+
+    // Crouch (B or R3)
+    const crouchPressed = pressed(GAMEPAD_BUTTONS.B) || pressed(GAMEPAD_BUTTONS.R3);
+    this._setCrouchHold(crouchPressed);
+
+    // Sprint (L3 - Toggle)
+    if (pressed(GAMEPAD_BUTTONS.L3) && !this._prevGamepadButtons[GAMEPAD_BUTTONS.L3]) {
+      // Toggle sprint on press
+      const nextState = !this._sprintActive;
+      this._setSprintSource('gamepad', nextState);
+    }
+
+    // Hotbar (LB/RB)
+    if (pressed(GAMEPAD_BUTTONS.LB) && !this._prevGamepadButtons[GAMEPAD_BUTTONS.LB]) {
+      this._setHotbarIndex(this._hotbarIndex - 1 < 0 ? HOTBAR_SLOT_COUNT - 1 : this._hotbarIndex - 1);
+    }
+    if (pressed(GAMEPAD_BUTTONS.RB) && !this._prevGamepadButtons[GAMEPAD_BUTTONS.RB]) {
+      this._setHotbarIndex((this._hotbarIndex + 1) % HOTBAR_SLOT_COUNT);
+    }
+
+    // Actions (LT/RT)
+    // Break (RT)
+    if (pressed(GAMEPAD_BUTTONS.RT) && !this._prevGamepadButtons[GAMEPAD_BUTTONS.RT]) {
+      this._gamepadActionState.break = true;
+    }
+    // Place (LT)
+    if (pressed(GAMEPAD_BUTTONS.LT) && !this._prevGamepadButtons[GAMEPAD_BUTTONS.LT]) {
+      this._gamepadActionState.place = true;
+    }
+    
+    // Update previous state
+    for (let i = 0; i < this._prevGamepadButtons.length; i++) {
+      this._prevGamepadButtons[i] = pressed(i);
+    }
   }
 
   isPointerLocked() {

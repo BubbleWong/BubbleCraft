@@ -18,6 +18,14 @@ const CAMERA_VIEW_COUNT = 3;
 const THIRD_PERSON_CAMERA_DISTANCE = 4.2;
 const THIRD_PERSON_CAMERA_HEIGHT = 0.32;
 const THIRD_PERSON_CAMERA_COLLISION_PADDING = 0.18;
+const ACTION_SWING_DURATION = 0.22;
+const ACTION_SWING_REPEAT_INTERVAL = 0.18;
+const FIRST_PERSON_HAND_REST_X = 0.54;
+const FIRST_PERSON_HAND_REST_Y = -0.78;
+const FIRST_PERSON_HAND_REST_Z = 0.8;
+const FIRST_PERSON_HAND_BOB_X = 0.018;
+const FIRST_PERSON_HAND_BOB_Y = 0.014;
+const FIRST_PERSON_HAND_BOB_Z = 0.012;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
@@ -150,8 +158,14 @@ export class PlayerController {
     this._walkCycle = 0;
     this._limbSwing = 0;
     this._crouchVisual = 0;
+    this._actionSwingTime = 0;
+    this._actionSwingRepeatTimer = 0;
+    this._actionActiveLastFrame = false;
+    this._animationDisposers = [];
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._createAvatar();
+    this._createFirstPersonHands();
+    this._bindAnimationEvents();
     this._syncAvatarTransform();
     this._lastGroundFootY = this._footY();
     this._fallStartFootY = Math.floor(this._lastGroundFootY);
@@ -192,15 +206,18 @@ export class PlayerController {
 
   update(deltaSeconds, frameInput = null) {
     const inputState = frameInput ?? this.input.poll();
+    const actionActive = Boolean(inputState.actions?.break || inputState.actions?.place);
     if (inputState.cycleCameraView) {
       this.cycleCameraView();
     }
+    this._updateActionSwing(deltaSeconds, actionActive);
     this._applyCameraOrientation(inputState.look);
     this._updateCrouchTransition(deltaSeconds);
     this._integrateMovement(deltaSeconds, inputState);
     this._syncAvatarTransform();
     const horizontalDistance = Math.hypot(this._actualMovement.x, this._actualMovement.z);
     this._updateAvatarPose(deltaSeconds, horizontalDistance);
+    this._updateFirstPersonHands(deltaSeconds, horizontalDistance);
     this._updateCameraView();
 
     if (this.mesh.position.y < -64) {
@@ -232,8 +249,18 @@ export class PlayerController {
   }
 
   dispose() {
+    for (const dispose of this._animationDisposers) {
+      try {
+        dispose?.();
+      } catch (error) {
+        // ignore animation listener cleanup failures
+      }
+    }
+    this._animationDisposers.length = 0;
     this._avatarRoot?.dispose?.(false, true);
     this._avatarRoot = null;
+    this._viewModelRoot?.dispose?.(false, true);
+    this._viewModelRoot = null;
     this._cameraMount?.dispose?.();
     this._cameraMount = null;
     if (this.mesh.physicsImpostor) {
@@ -511,6 +538,7 @@ export class PlayerController {
 
   _updateAvatarVisibility() {
     this._avatarRoot?.setEnabled?.(this._cameraViewMode !== CAMERA_VIEW_FIRST_PERSON);
+    this._viewModelRoot?.setEnabled?.(this._cameraViewMode === CAMERA_VIEW_FIRST_PERSON);
   }
 
   _syncAvatarTransform() {
@@ -519,6 +547,39 @@ export class PlayerController {
     this._avatarRoot.rotation.x = 0;
     this._avatarRoot.rotation.y = this.mesh.rotation.y;
     this._avatarRoot.rotation.z = 0;
+  }
+
+  _bindAnimationEvents() {
+    if (!this.eventBus?.on) return;
+    this._animationDisposers.push(
+      this.eventBus.on('block:break', () => this._triggerActionSwing()),
+      this.eventBus.on('block:place', () => this._triggerActionSwing()),
+    );
+  }
+
+  _triggerActionSwing() {
+    this._actionSwingTime = ACTION_SWING_DURATION;
+  }
+
+  _updateActionSwing(deltaSeconds, actionActive) {
+    this._actionSwingTime = Math.max(0, this._actionSwingTime - deltaSeconds);
+    this._actionSwingRepeatTimer = Math.max(0, this._actionSwingRepeatTimer - deltaSeconds);
+
+    if (actionActive) {
+      if (!this._actionActiveLastFrame || this._actionSwingRepeatTimer <= 0) {
+        this._triggerActionSwing();
+        this._actionSwingRepeatTimer = ACTION_SWING_REPEAT_INTERVAL;
+      }
+    } else {
+      this._actionSwingRepeatTimer = 0;
+    }
+
+    this._actionActiveLastFrame = actionActive;
+  }
+
+  _getActionSwingCurve() {
+    if (this._actionSwingTime <= 0) return 0;
+    return Math.sin((1 - (this._actionSwingTime / ACTION_SWING_DURATION)) * Math.PI);
   }
 
   _createAvatar() {
@@ -607,6 +668,55 @@ export class PlayerController {
     );
   }
 
+  _createFirstPersonHands() {
+    if (!this.scene || !this.camera) return;
+
+    const makeMaterial = (name, color) => {
+      const material = new BABYLON.StandardMaterial(name, this.scene);
+      material.diffuseColor = color;
+      material.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+      return material;
+    };
+
+    const makePart = (name, parent, options, material, position) => {
+      const mesh = BABYLON.MeshBuilder.CreateBox(name, options, this.scene);
+      mesh.parent = parent;
+      mesh.position.copyFrom(position);
+      mesh.material = material;
+      mesh.isPickable = false;
+      mesh.checkCollisions = false;
+      mesh.alwaysSelectAsActiveMesh = true;
+      return mesh;
+    };
+
+    this._viewModelRoot = new BABYLON.TransformNode('player-viewmodel-root', this.scene);
+    this._viewModelRoot.parent = this.camera;
+    this._viewModelRoot.position.set(FIRST_PERSON_HAND_REST_X, FIRST_PERSON_HAND_REST_Y, FIRST_PERSON_HAND_REST_Z);
+
+    const skin = makeMaterial('player-viewmodel-skin', new BABYLON.Color3(0.96, 0.82, 0.69));
+    const armHeight = 0.84;
+    const handHeight = 0.2;
+
+    this._viewRightArmPivot = new BABYLON.TransformNode('player-view-right-arm-pivot', this.scene);
+    this._viewRightArmPivot.parent = this._viewModelRoot;
+    this._viewRightArmPivot.position.set(0, 0, 0);
+
+    this._viewRightArm = makePart(
+      'player-view-right-arm',
+      this._viewRightArmPivot,
+      { width: 0.26, height: armHeight, depth: 0.26 },
+      skin,
+      new BABYLON.Vector3(0, -armHeight * 0.5, 0),
+    );
+    this._viewRightHand = makePart(
+      'player-view-right-hand',
+      this._viewRightArmPivot,
+      { width: 0.24, height: handHeight, depth: 0.24 },
+      skin,
+      new BABYLON.Vector3(0, -(armHeight + handHeight * 0.5) + 0.02, 0),
+    );
+  }
+
   _updateAvatarPose(deltaSeconds, horizontalDistance) {
     if (!this._avatarRoot) return;
 
@@ -620,6 +730,7 @@ export class PlayerController {
     this._limbSwing += (swingTarget - this._limbSwing) * poseLerp;
     const crouchTarget = this._isCrouching ? 1 : 0;
     this._crouchVisual += (crouchTarget - this._crouchVisual) * poseLerp;
+    const actionCurve = this._getActionSwingCurve();
 
     const crouchDrop = this._crouchVisual * 0.28;
     const armLift = this._crouchVisual * 0.18;
@@ -637,9 +748,32 @@ export class PlayerController {
 
     this._avatarHead.rotation.x = this._cameraMount.rotation.x * 0.35;
     this._avatarLeftArm.rotation.x = this._limbSwing - armLift;
-    this._avatarRightArm.rotation.x = -this._limbSwing - armLift;
+    this._avatarRightArm.rotation.x = -this._limbSwing - armLift - actionCurve * 1.2;
+    this._avatarRightArm.rotation.z = actionCurve * 0.18;
+    this._avatarLeftArm.rotation.z = 0;
     this._avatarLeftLeg.rotation.x = -this._limbSwing;
     this._avatarRightLeg.rotation.x = this._limbSwing;
+  }
+
+  _updateFirstPersonHands(deltaSeconds, horizontalDistance) {
+    if (!this._viewModelRoot || !this._viewRightArmPivot) return;
+
+    const moving = this._grounded && horizontalDistance > FOOTSTEP_MIN_DISTANCE;
+    const walkWave = moving ? Math.sin(this._walkCycle) : 0;
+    const bobWave = moving ? Math.cos(this._walkCycle * 2) : 0;
+    const actionCurve = this._getActionSwingCurve();
+    const poseLerp = Math.min(1, Math.max(0, deltaSeconds * 12));
+    const crouchOffset = this._crouchVisual * 0.08;
+    const actionPull = actionCurve * 0.11;
+    const actionLift = actionCurve * 0.04;
+
+    this._viewModelRoot.position.x += (((FIRST_PERSON_HAND_REST_X + walkWave * FIRST_PERSON_HAND_BOB_X - actionPull) - this._viewModelRoot.position.x) * poseLerp);
+    this._viewModelRoot.position.y += (((FIRST_PERSON_HAND_REST_Y + bobWave * FIRST_PERSON_HAND_BOB_Y - crouchOffset + actionLift) - this._viewModelRoot.position.y) * poseLerp);
+    this._viewModelRoot.position.z += (((FIRST_PERSON_HAND_REST_Z + Math.abs(walkWave) * FIRST_PERSON_HAND_BOB_Z - actionCurve * 0.06) - this._viewModelRoot.position.z) * poseLerp);
+
+    this._viewRightArmPivot.rotation.x = -1.36 + walkWave * 0.08 - actionCurve * 0.92;
+    this._viewRightArmPivot.rotation.y = 0.08 - actionCurve * 0.12;
+    this._viewRightArmPivot.rotation.z = -0.46 - walkWave * 0.03 - actionCurve * 0.22;
   }
 
   getInteractionOrigin() {

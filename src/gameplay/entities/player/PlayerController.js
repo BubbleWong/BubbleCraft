@@ -360,7 +360,8 @@ export class PlayerController {
           ? this._fallStartFootY
           : landingSurfaceInt;
         const fallDistance = Math.max(0, startFoot - landingSurfaceInt);
-        const damage = Math.max(0, fallDistance - SAFE_FALL_BLOCKS);
+        const landedInWater = this._didFallThroughWater(startFoot, landingSurfaceInt);
+        const damage = landedInWater ? 0 : Math.max(0, fallDistance - SAFE_FALL_BLOCKS);
         if (damage > 0) {
           this._emitDamage({ amount: damage, cause: 'fall', fallDistance });
         }
@@ -519,6 +520,28 @@ export class PlayerController {
     }
     if (!Number.isFinite(blockType)) return BLOCK_TYPES.dirt;
     return blockType;
+  }
+
+  _didFallThroughWater(startFootY, landingFootY) {
+    if (!this.world?.getBlockAtWorld || !Number.isFinite(startFootY) || !Number.isFinite(landingFootY)) {
+      return false;
+    }
+
+    const fromY = Math.min(startFootY, landingFootY);
+    const toY = Math.max(startFootY, landingFootY);
+    const samples = this._groundCheckOffsets ?? [new BABYLON.Vector3(0, 0, 0)];
+
+    for (const lateral of samples) {
+      const worldX = Math.floor(this.mesh.position.x + lateral.x);
+      const worldZ = Math.floor(this.mesh.position.z + lateral.z);
+      for (let y = fromY; y <= toY; y += 1) {
+        if (this.world.getBlockAtWorld(worldX, y, worldZ) === BLOCK_TYPES.water) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   _footY(position = this.mesh.position) {

@@ -2,6 +2,14 @@ import { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_TYPES } from '../../constants.js';
 
 const MAX_INTERACT_DISTANCE = 6.5;
 const EPSILON = 1e-3;
+const PLAYER_SUPPORT_PLACEMENT_TOLERANCE = 0.05;
+const WATER_FILL_NEIGHBORS = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
 
 export class BlockInteraction {
   constructor({ scene, world, player, camera, hud, inventory, onInventoryChange, context = null, eventBus = null }) {
@@ -154,8 +162,11 @@ export class BlockInteraction {
     const worldX = chunk.origin.x + blockX;
     const worldY = blockY;
     const worldZ = chunk.origin.z + blockZ;
+    const replacementType = this._shouldFillBrokenBlockWithWater(worldX, worldY, worldZ)
+      ? BLOCK_TYPES.water
+      : BLOCK_TYPES.air;
 
-    const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, BLOCK_TYPES.air);
+    const changed = this.world.setBlockAtWorld(worldX, worldY, worldZ, replacementType);
     // console.log('[blockInteraction] break attempt', { worldX, worldY, worldZ, blockType, changed });
     if (!changed) return;
     this.sound?.playBlockBreak(blockType);
@@ -172,6 +183,39 @@ export class BlockInteraction {
       player: this.player,
     });
     this.eventBus?.emit('inventory:changed', { inventory: this.inventory });
+  }
+
+  _shouldFillBrokenBlockWithWater(worldX, worldY, worldZ) {
+    if (!this.world?.getBlockAtWorld) return false;
+
+    for (const [dx, dy, dz] of WATER_FILL_NEIGHBORS) {
+      const neighborType = this.world.getBlockAtWorld(worldX + dx, worldY + dy, worldZ + dz);
+      if (neighborType === BLOCK_TYPES.water) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  _getPlayerBounds() {
+    const playerMesh = this.player?.mesh;
+    const playerPos = playerMesh?.position;
+    if (!playerPos) return null;
+
+    const ellipsoid = playerMesh.ellipsoid;
+    const radiusX = Math.max(0.3, ellipsoid?.x ?? 0.3);
+    const radiusZ = Math.max(0.3, ellipsoid?.z ?? 0.3);
+    const height = Math.max(1.3, (ellipsoid?.y ?? 0.95) * 2);
+
+    return {
+      minX: playerPos.x - radiusX,
+      maxX: playerPos.x + radiusX,
+      minZ: playerPos.z - radiusZ,
+      maxZ: playerPos.z + radiusZ,
+      bottom: playerPos.y,
+      top: playerPos.y + height,
+    };
   }
 
   _placeBlock(target) {
@@ -193,18 +237,19 @@ export class BlockInteraction {
       return;
     }
 
-    const playerPos = this.player?.mesh?.position;
-    if (!playerPos) return;
-    const dx = Math.abs(worldX + 0.5 - playerPos.x);
-    const dz = Math.abs(worldZ + 0.5 - playerPos.z);
+    const playerBounds = this._getPlayerBounds();
+    if (!playerBounds) return;
 
-    if (dx <= 0.6 && dz <= 0.6) {
-      const playerBottom = playerPos.y;
-      const playerTop = playerPos.y + 1.85; // Slightly less than 1.9 for leniency
-      const blockBottom = worldY;
-      const blockTop = worldY + 1.0;
+    const blockBottom = worldY;
+    const blockTop = worldY + 1.0;
+    const overlapsX = playerBounds.minX < (worldX + 1 - EPSILON) && playerBounds.maxX > (worldX + EPSILON);
+    const overlapsZ = playerBounds.minZ < (worldZ + 1 - EPSILON) && playerBounds.maxZ > (worldZ + EPSILON);
 
-      if (playerBottom < blockTop && playerTop > blockBottom) {
+    if (overlapsX && overlapsZ) {
+      const intersectsBody = playerBounds.bottom < (blockTop - EPSILON) && playerBounds.top > (blockBottom + EPSILON);
+      const supportsFeet = playerBounds.bottom <= blockTop + PLAYER_SUPPORT_PLACEMENT_TOLERANCE
+        && playerBounds.bottom >= blockBottom - PLAYER_SUPPORT_PLACEMENT_TOLERANCE;
+      if (intersectsBody || supportsFeet) {
         return;
       }
     }

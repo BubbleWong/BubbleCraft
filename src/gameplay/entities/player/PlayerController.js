@@ -93,6 +93,15 @@ export class PlayerController {
       new BABYLON.Vector3(-lateralProbe * 0.7, 0, -lateralProbe * 0.7),
     ];
     this._grounded = false;
+      new BABYLON.Vector3(-lateralProbe, 0, 0),
+      new BABYLON.Vector3(0, 0, lateralProbe),
+      new BABYLON.Vector3(0, 0, -lateralProbe),
+      new BABYLON.Vector3(lateralProbe * 0.7, 0, lateralProbe * 0.7),
+      new BABYLON.Vector3(-lateralProbe * 0.7, 0, lateralProbe * 0.7),
+      new BABYLON.Vector3(lateralProbe * 0.7, 0, -lateralProbe * 0.7),
+      new BABYLON.Vector3(-lateralProbe * 0.7, 0, -lateralProbe * 0.7),
+    ];
+    this._grounded = false;
     this._timeSinceGrounded = 0;
     this._lastGroundFootY = 0;
     this._fallStartFootY = 0;
@@ -277,18 +286,11 @@ export class PlayerController {
     const expectedY = delta.y;
     const actualY = this._actualMovement.y;
 
-    let groundedAfter = false;
-    if (expectedY < -COLLISION_EPSILON && Math.abs(expectedY - actualY) > COLLISION_EPSILON) {
-      groundedAfter = true;
-    }
+    let groundedAfter = this._isGrounded();
 
     const headHit = expectedY > COLLISION_EPSILON && actualY + COLLISION_EPSILON < expectedY;
     if (headHit && this._velocity.y > 0) {
       this._velocity.y = 0;
-    }
-
-    if (!groundedAfter) {
-      groundedAfter = this._isGrounded();
     }
 
     if (wasGrounded && !groundedAfter) {

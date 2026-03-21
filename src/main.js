@@ -33,5 +33,6 @@ app.init().catch((error) => {
   }
   if (loadingOverlay) {
     loadingOverlay.classList.remove('hidden');
+    loadingOverlay.setAttribute('aria-hidden', 'false');
   }
 });

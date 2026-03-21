@@ -705,6 +705,34 @@ export class WeatherSystem {
     this.player = player ?? null;
   }
 
+  dispose() {
+    this.rainSystem?.stop?.();
+    this.rainSystem?.dispose?.();
+    this.rainSystem = null;
+    this.snowSystem?.stop?.();
+    this.snowSystem?.dispose?.();
+    this.snowSystem = null;
+    this.rainEmitter?.dispose?.();
+    this.rainEmitter = null;
+    this.snowEmitter?.dispose?.();
+    this.snowEmitter = null;
+    this.precipRoot?.dispose?.();
+    this.precipRoot = null;
+    this.lightningLight?.dispose?.();
+    this.lightningLight = null;
+    for (const texture of Object.values(this._particleTextures)) {
+      texture?.dispose?.();
+    }
+    this._particleTextures = Object.create(null);
+    if (typeof window !== 'undefined') {
+      try {
+        delete window.setWeatherDebug;
+      } catch (error) {
+        // ignore global cleanup failures
+      }
+    }
+  }
+
   exposeDebugHelpers() {
     if (typeof window === 'undefined') return;
     const api = (options = {}) => {

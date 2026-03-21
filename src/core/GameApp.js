@@ -55,9 +55,11 @@ export class GameApp {
     this._fpsFrameCount = 0;
     this._fpsSmoothed = 0;
     this._started = false;
+    this._interactionActive = false;
+    this._resizeListener = () => this.engine?.resize();
 
     this._onCanvasContextMenu = (event) => {
-      if (this.input?.isPointerLocked?.()) {
+      if (this.input?.isPointerLocked?.() || this.input?.isTouchMode?.()) {
         event.preventDefault();
       }
     };
@@ -101,15 +103,11 @@ export class GameApp {
         } else if (this.canvas) {
           this.canvas.style.cursor = 'none';
         }
-        this.hud?.setPointerLock(locked);
-        if (locked) {
-          this.sound?.resume();
-          if (this._worldReady) {
-            void this.sound?.resumeBgm();
-          }
-        } else {
-          this.sound?.pauseBgm();
-        }
+        this._syncInteractionState(
+          locked ||
+          (this.input?.isTouchMode?.() ?? false) ||
+          (this.input?.isUsingGamepad?.() ?? false),
+        );
       },
     });
     this.context.registerService('input', this.input);
@@ -133,13 +131,14 @@ export class GameApp {
       this.scene.render();
     });
 
-    window.addEventListener('resize', () => this.engine?.resize());
+    window.addEventListener('resize', this._resizeListener);
   }
 
   dispose() {
     if (this.canvas) {
       this.canvas.removeEventListener('contextmenu', this._onCanvasContextMenu);
     }
+    window.removeEventListener('resize', this._resizeListener);
     window.removeEventListener('wheel', this._onWheel);
     if (this.pointerObserver) {
       this.scene?.onPointerObservable?.remove(this.pointerObserver);
@@ -154,9 +153,11 @@ export class GameApp {
     this.sound?.dispose?.();
     this.player?.dispose();
     this.world?.dispose();
+    this.weatherSystem?.dispose?.();
     this.scene?.dispose();
     this.engine?.dispose();
     this.context?.dispose();
+    this._clearHealthApi();
     this._started = false;
   }
 
@@ -213,7 +214,12 @@ export class GameApp {
     this.hud.bindInventory(this.inventory);
     this.currentHealth = this.maxHealth;
     this.hud.updateHealth(this.currentHealth, this.maxHealth);
-    this.hud.setPointerLock(this.input?.isPointerLocked?.() ?? false);
+    this._syncInteractionState(
+      (this.input?.isPointerLocked?.() ?? false) ||
+      (this.input?.isTouchMode?.() ?? false) ||
+      (this.input?.isUsingGamepad?.() ?? false),
+      { force: true },
+    );
     this._exposeHealthApi();
 
     const orientation = this.input.getOrientation?.();
@@ -267,12 +273,12 @@ export class GameApp {
 
     this._worldReady = true;
     void this.sound?.prepareBgm?.();
-    if (this.input?.isPointerLocked?.()) {
-      this.sound?.resume();
-      void this.sound?.resumeBgm();
-    } else {
-      this.sound?.pauseBgm();
-    }
+    this._syncInteractionState(
+      (this.input?.isPointerLocked?.() ?? false) ||
+      (this.input?.isTouchMode?.() ?? false) ||
+      (this.input?.isUsingGamepad?.() ?? false),
+      { force: true },
+    );
 
     this._setLoadingState(false);
   }
@@ -315,6 +321,9 @@ export class GameApp {
     this.scene.onBeforeRenderObservable.add(() => {
       const delta = this.scene.getEngine().getDeltaTime() * 0.001;
       const frameInput = this.input?.poll?.() ?? null;
+      this._syncInteractionState(
+        Boolean(frameInput?.pointerLocked || frameInput?.usingTouch || frameInput?.usingGamepad),
+      );
 
       if (this.player && frameInput) {
         if (frameInput.hotbarChanged) {
@@ -322,7 +331,8 @@ export class GameApp {
         }
 
         this.player.update(delta, frameInput);
-        this.world?.updateStreaming(this.player.mesh?.position ?? null);
+        const forward = this.camera?.getDirection?.(BABYLON.Axis.Z) ?? null;
+        this.world?.updateStreaming(this.player.mesh?.position ?? null, forward);
         this.blockInteraction?.update(frameInput);
         if (frameInput.toggleHudDetails) {
           this.hud?.toggleDetails();
@@ -352,7 +362,10 @@ export class GameApp {
     if (!this.loadingUi) return;
     const { overlay, labelEl, barEl, percentEl } = this.loadingUi;
 
-    if (overlay) overlay.classList.toggle('hidden', !active);
+    if (overlay) {
+      overlay.classList.toggle('hidden', !active);
+      overlay.setAttribute('aria-hidden', String(!active));
+    }
     if (labelEl) labelEl.textContent = label;
     if (barEl) barEl.style.width = `${Math.max(0, percent)}%`;
     if (percentEl) percentEl.textContent = `${percent}%`;
@@ -364,6 +377,7 @@ export class GameApp {
   }
 
   _exposeHealthApi() {
+    if (typeof window === 'undefined') return;
     try {
       Object.defineProperty(window, 'setHealthPoints', {
         value: (value) => {
@@ -378,6 +392,15 @@ export class GameApp {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn('Failed to expose setHealthPoints API', error);
+    }
+  }
+
+  _clearHealthApi() {
+    if (typeof window === 'undefined') return;
+    try {
+      delete window.setHealthPoints;
+    } catch (error) {
+      // ignore global cleanup failures
     }
   }
 
@@ -465,6 +488,21 @@ export class GameApp {
     this.activeHotbarIndex = nextIndex;
     this._refreshInventoryUI(direction);
     return true;
+  }
+
+  _syncInteractionState(active, { force = false } = {}) {
+    const next = Boolean(active);
+    if (!force && this._interactionActive === next) return;
+    this._interactionActive = next;
+    this.hud?.setPointerLock(next);
+    if (next) {
+      this.sound?.resume();
+      if (this._worldReady) {
+        void this.sound?.resumeBgm();
+      }
+    } else {
+      this.sound?.pauseBgm();
+    }
   }
 
 }

@@ -22,6 +22,8 @@ const KEY_LOOK_SPEED = (Math.PI / 180) * 120; // radians per second
 
 const GAMEPAD_DEADZONE = 0.08;
 const GAMEPAD_LOOK_SPEED = 5.5; // Multiplier for look
+const TOUCH_LOOK_MULTIPLIER = 0.85;
+const TOUCH_MOVE_DEADZONE = 0.12;
 const GAMEPAD_BUTTONS = {
   A: 0,
   B: 1,
@@ -77,6 +79,20 @@ export class InputManager {
     this._prevGamepadButtons = new Array(16).fill(false);
     this._gamepadActionState = { break: false, place: false };
     this._gamepadMove = { x: 0, y: 0 };
+    this._touchActionState = { break: false, place: false };
+    this._touchMoveAxis = { x: 0, y: 0 };
+    this._touchMovePointerId = null;
+    this._touchLookPointerId = null;
+    this._touchLookLast = null;
+    this._usingGamepad = false;
+    this._usingTouch = false;
+    this._touchSupported = this._detectTouchSupport();
+    this._touchControlsEl = null;
+    this._touchMovePad = null;
+    this._touchMoveKnob = null;
+    this._touchJumpButton = null;
+    this._touchAttackButton = null;
+    this._touchPlaceButton = null;
 
     this._handleKeyDown = (event) => this._onKeyDown(event);
     this._handleKeyUp = (event) => this._onKeyUp(event);
@@ -85,6 +101,15 @@ export class InputManager {
     this._handlePointerLockError = () => this._onPointerLockError();
     this._handleBlur = () => this._resetKeys();
     this._handleOverlayPointerDown = (event) => this._onOverlayPointerDown(event);
+    this._handleCanvasPointerDown = (event) => this._onCanvasPointerDown(event);
+    this._handleCanvasPointerMove = (event) => this._onCanvasPointerMove(event);
+    this._handleCanvasPointerUp = (event) => this._onCanvasPointerUp(event);
+    this._handleTouchMoveStart = (event) => this._onTouchMoveStart(event);
+    this._handleTouchMoveDrag = (event) => this._onTouchMoveDrag(event);
+    this._handleTouchMoveEnd = (event) => this._onTouchMoveEnd(event);
+    this._handleTouchJump = (event) => this._onTouchJump(event);
+    this._handleTouchAttack = (event) => this._onTouchAttack(event);
+    this._handleTouchPlace = (event) => this._onTouchPlace(event);
     this._handleTouchSprintDown = (event) => this._onTouchSprintDown(event);
     this._handleTouchSprintEnd = (event) => this._onTouchSprintEnd(event);
     this._handleTouchCrouch = (event) => this._onTouchCrouchToggle(event);
@@ -101,14 +126,15 @@ export class InputManager {
     }
 
     if (this.canvas) {
-      this.canvas.addEventListener('click', () => {
-        if (!this._pointerLocked) this.requestPointerLock({ source: 'canvas' });
-      });
+      this.canvas.addEventListener('pointerdown', this._handleCanvasPointerDown);
+      this.canvas.addEventListener('pointermove', this._handleCanvasPointerMove);
+      this.canvas.addEventListener('pointerup', this._handleCanvasPointerUp);
+      this.canvas.addEventListener('pointercancel', this._handleCanvasPointerUp);
     }
 
     this._bindTouchButtons();
 
-    this._syncPointerLockState();
+    this._syncPointerLockState({ force: true });
   }
 
   dispose() {
@@ -121,6 +147,19 @@ export class InputManager {
     if (this.overlay) {
       this.overlay.removeEventListener('pointerdown', this._handleOverlayPointerDown);
     }
+    if (this.canvas) {
+      this.canvas.removeEventListener('pointerdown', this._handleCanvasPointerDown);
+      this.canvas.removeEventListener('pointermove', this._handleCanvasPointerMove);
+      this.canvas.removeEventListener('pointerup', this._handleCanvasPointerUp);
+      this.canvas.removeEventListener('pointercancel', this._handleCanvasPointerUp);
+    }
+    if (this._touchMovePad) {
+      this._touchMovePad.removeEventListener('pointerdown', this._handleTouchMoveStart);
+      this._touchMovePad.removeEventListener('pointermove', this._handleTouchMoveDrag);
+      this._touchMovePad.removeEventListener('pointerup', this._handleTouchMoveEnd);
+      this._touchMovePad.removeEventListener('pointercancel', this._handleTouchMoveEnd);
+      this._touchMovePad = null;
+    }
     if (this._touchSprintButton) {
       this._touchSprintButton.removeEventListener('pointerdown', this._handleTouchSprintDown);
       this._touchSprintButton.removeEventListener('pointerup', this._handleTouchSprintEnd);
@@ -132,6 +171,20 @@ export class InputManager {
       this._touchCrouchButton.removeEventListener('pointerdown', this._handleTouchCrouch);
       this._touchCrouchButton = null;
     }
+    if (this._touchJumpButton) {
+      this._touchJumpButton.removeEventListener('pointerdown', this._handleTouchJump);
+      this._touchJumpButton = null;
+    }
+    if (this._touchAttackButton) {
+      this._touchAttackButton.removeEventListener('pointerdown', this._handleTouchAttack);
+      this._touchAttackButton = null;
+    }
+    if (this._touchPlaceButton) {
+      this._touchPlaceButton.removeEventListener('pointerdown', this._handleTouchPlace);
+      this._touchPlaceButton = null;
+    }
+    this._touchControlsEl = null;
+    this._touchMoveKnob = null;
   }
 
   requestPointerLock({ source = null } = {}) {
@@ -176,6 +229,14 @@ export class InputManager {
     return this.getYawPitch();
   }
 
+  isTouchMode() {
+    return this._usingTouch;
+  }
+
+  isUsingGamepad() {
+    return this._usingGamepad;
+  }
+
   _now() {
     if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
       return performance.now();
@@ -192,10 +253,11 @@ export class InputManager {
     this._lastPollTime = now;
 
     this._pollGamepad(deltaSeconds);
+    this._syncInteractionUi();
 
     // Combine keyboard and gamepad movement
-    const moveX = this._moveAxis.x + this._gamepadMove.x;
-    const moveY = this._moveAxis.y + this._gamepadMove.y;
+    const moveX = this._moveAxis.x + this._gamepadMove.x + this._touchMoveAxis.x;
+    const moveY = this._moveAxis.y + this._gamepadMove.y + this._touchMoveAxis.y;
 
     // Clamp combined movement to max length 1.0
     const moveLenSq = moveX * moveX + moveY * moveY;
@@ -228,9 +290,14 @@ export class InputManager {
     this._lookDelta.y = 0;
     this._jumpRequested = false;
 
-    const actions = { ...this._gamepadActionState };
+    const actions = {
+      break: this._gamepadActionState.break || this._touchActionState.break,
+      place: this._gamepadActionState.place || this._touchActionState.place,
+    };
     this._gamepadActionState.break = false;
     this._gamepadActionState.place = false;
+    this._touchActionState.break = false;
+    this._touchActionState.place = false;
 
     return {
       move,
@@ -240,6 +307,7 @@ export class InputManager {
       sprint,
       pointerLocked: this._pointerLocked,
       usingGamepad: this._usingGamepad,
+      usingTouch: this._usingTouch,
       hotbarIndex: this._hotbarIndex,
       hotbarChanged: this._consumeHotbarDirty(),
       toggleHudDetails: this._consumeToggleHudDetails(),
@@ -437,22 +505,19 @@ export class InputManager {
     this._lookDelta.y += event.movementY;
   }
 
-  _syncPointerLockState() {
+  _syncPointerLockState({ force = false } = {}) {
     const locked = document.pointerLockElement === this.canvas;
-    if (locked === this._pointerLocked) return;
+    if (!force && locked === this._pointerLocked) {
+      this._syncInteractionUi();
+      return;
+    }
     this._pointerLocked = locked;
 
     if (!locked) {
       this._resetKeys();
     }
 
-    if (this.overlay) {
-      this.overlay.classList.toggle('hidden', locked);
-    }
-    if (this.crosshair) {
-      this.crosshair.classList.toggle('hidden', !locked);
-    }
-
+    this._syncInteractionUi();
     this.onPointerLockChanged(locked);
   }
 
@@ -468,6 +533,11 @@ export class InputManager {
     this._keyLookAxis.x = 0;
     this._keyLookAxis.y = 0;
     this._crouchHold = false;
+    this._clearTouchMoveAxis();
+    this._touchLookPointerId = null;
+    this._touchLookLast = null;
+    this._touchActionState.break = false;
+    this._touchActionState.place = false;
     this._touchSprintPointers.clear();
     this._clearSprintSources();
     this._updateCrouchIndicator();
@@ -483,9 +553,65 @@ export class InputManager {
 
   _onOverlayPointerDown(event) {
     if (this._pointerLocked) return;
+    if (this._isTouchPointer(event)) {
+      event.preventDefault();
+      this._setTouchMode(true);
+      return;
+    }
     if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
     event.preventDefault();
     this.requestPointerLock({ source: 'overlay' });
+  }
+
+  _onCanvasPointerDown(event) {
+    if (this._isTouchPointer(event)) {
+      if (!this._usingTouch) {
+        this._setTouchMode(true);
+      }
+      if (event.target !== this.canvas || this._touchLookPointerId !== null) return;
+      event.preventDefault();
+      this._touchLookPointerId = event.pointerId;
+      this._touchLookLast = { x: event.clientX, y: event.clientY };
+      if (event.target?.setPointerCapture) {
+        try {
+          event.target.setPointerCapture(event.pointerId);
+        } catch (error) {
+          // ignore capture failures
+        }
+      }
+      return;
+    }
+
+    if (this._usingTouch) {
+      this._setTouchMode(false);
+    }
+    if (!this._pointerLocked) {
+      this.requestPointerLock({ source: 'canvas' });
+    }
+  }
+
+  _onCanvasPointerMove(event) {
+    if (!this._isTouchPointer(event)) return;
+    if (event.pointerId !== this._touchLookPointerId || !this._touchLookLast) return;
+    const deltaX = event.clientX - this._touchLookLast.x;
+    const deltaY = event.clientY - this._touchLookLast.y;
+    this._touchLookLast = { x: event.clientX, y: event.clientY };
+    this._lookDelta.x += deltaX * TOUCH_LOOK_MULTIPLIER;
+    this._lookDelta.y += deltaY * TOUCH_LOOK_MULTIPLIER;
+  }
+
+  _onCanvasPointerUp(event) {
+    if (!this._isTouchPointer(event)) return;
+    if (event.pointerId !== this._touchLookPointerId) return;
+    if (event.target?.releasePointerCapture) {
+      try {
+        event.target.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release failures
+      }
+    }
+    this._touchLookPointerId = null;
+    this._touchLookLast = null;
   }
 
   _isLookKey(code) {
@@ -604,9 +730,30 @@ export class InputManager {
 
   _bindTouchButtons() {
     if (typeof document === 'undefined') return;
+    this._touchControlsEl = document.getElementById('touch-controls');
+    this._touchMovePad = document.getElementById('touch-move-pad');
+    this._touchMoveKnob = document.getElementById('touch-move-knob');
+    this._touchJumpButton = document.getElementById('touch-action-jump');
+    this._touchAttackButton = document.getElementById('touch-action-attack');
+    this._touchPlaceButton = document.getElementById('touch-action-place');
     this._touchSprintButton = document.getElementById('touch-action-sprint');
     this._touchCrouchButton = document.getElementById('touch-action-crouch');
 
+    if (this._touchMovePad) {
+      this._touchMovePad.addEventListener('pointerdown', this._handleTouchMoveStart);
+      this._touchMovePad.addEventListener('pointermove', this._handleTouchMoveDrag);
+      this._touchMovePad.addEventListener('pointerup', this._handleTouchMoveEnd);
+      this._touchMovePad.addEventListener('pointercancel', this._handleTouchMoveEnd);
+    }
+    if (this._touchJumpButton) {
+      this._touchJumpButton.addEventListener('pointerdown', this._handleTouchJump);
+    }
+    if (this._touchAttackButton) {
+      this._touchAttackButton.addEventListener('pointerdown', this._handleTouchAttack);
+    }
+    if (this._touchPlaceButton) {
+      this._touchPlaceButton.addEventListener('pointerdown', this._handleTouchPlace);
+    }
     if (this._touchSprintButton) {
       this._touchSprintButton.setAttribute('aria-pressed', 'false');
       this._touchSprintButton.addEventListener('pointerdown', this._handleTouchSprintDown);
@@ -622,6 +769,7 @@ export class InputManager {
 
     this._updateCrouchIndicator();
     this._updateSprintIndicator();
+    this._syncInteractionUi();
   }
 
   _isTouchPointer(event) {
@@ -635,6 +783,7 @@ export class InputManager {
   _onTouchSprintDown(event) {
     if (!this._isTouchPointer(event)) return;
     event.preventDefault();
+    this._setTouchMode(true);
     this._touchSprintPointers.add(event.pointerId);
     if (event.target?.setPointerCapture) {
       try {
@@ -664,6 +813,144 @@ export class InputManager {
   _onTouchCrouchToggle(event) {
     if (!this._isTouchPointer(event)) return;
     event.preventDefault();
+    this._setTouchMode(true);
     this._toggleCrouch();
+  }
+
+  _onTouchMoveStart(event) {
+    if (!this._isTouchPointer(event)) return;
+    event.preventDefault();
+    this._setTouchMode(true);
+    this._touchMovePointerId = event.pointerId;
+    if (event.target?.setPointerCapture) {
+      try {
+        event.target.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture failures
+      }
+    }
+    this._updateTouchMoveAxis(event);
+  }
+
+  _onTouchMoveDrag(event) {
+    if (!this._isTouchPointer(event)) return;
+    if (event.pointerId !== this._touchMovePointerId) return;
+    event.preventDefault();
+    this._updateTouchMoveAxis(event);
+  }
+
+  _onTouchMoveEnd(event) {
+    if (!this._isTouchPointer(event)) return;
+    if (event.pointerId !== this._touchMovePointerId) return;
+    if (event.target?.releasePointerCapture) {
+      try {
+        event.target.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release failures
+      }
+    }
+    this._touchMovePointerId = null;
+    this._clearTouchMoveAxis();
+  }
+
+  _onTouchJump(event) {
+    if (!this._isTouchPointer(event)) return;
+    event.preventDefault();
+    this._setTouchMode(true);
+    this._jumpRequested = true;
+  }
+
+  _onTouchAttack(event) {
+    if (!this._isTouchPointer(event)) return;
+    event.preventDefault();
+    this._setTouchMode(true);
+    this._touchActionState.break = true;
+  }
+
+  _onTouchPlace(event) {
+    if (!this._isTouchPointer(event)) return;
+    event.preventDefault();
+    this._setTouchMode(true);
+    this._touchActionState.place = true;
+  }
+
+  _detectTouchSupport() {
+    if (typeof navigator !== 'undefined' && Number.isFinite(navigator.maxTouchPoints) && navigator.maxTouchPoints > 0) {
+      return true;
+    }
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      try {
+        if (window.matchMedia('(pointer: coarse)').matches) {
+          return true;
+        }
+      } catch (error) {
+        // ignore media query failures
+      }
+    }
+    return typeof window !== 'undefined' && 'ontouchstart' in window;
+  }
+
+  _setTouchMode(active) {
+    const next = Boolean(active && this._touchSupported);
+    if (this._usingTouch === next) {
+      this._syncInteractionUi();
+      return;
+    }
+    this._usingTouch = next;
+    if (!next) {
+      this._touchLookPointerId = null;
+      this._touchLookLast = null;
+      this._clearTouchMoveAxis();
+    }
+    this._syncInteractionUi();
+  }
+
+  _syncInteractionUi() {
+    const interactionActive = this._pointerLocked || this._usingTouch || this._usingGamepad;
+    if (this.overlay) {
+      this.overlay.classList.toggle('hidden', interactionActive);
+    }
+    if (this.crosshair) {
+      this.crosshair.classList.toggle('hidden', !interactionActive);
+    }
+    if (this._touchControlsEl) {
+      this._touchControlsEl.classList.toggle('hidden', !this._usingTouch);
+      this._touchControlsEl.setAttribute('aria-hidden', String(!this._usingTouch));
+    }
+  }
+
+  _updateTouchMoveAxis(event) {
+    if (!this._touchMovePad) return;
+    const rect = this._touchMovePad.getBoundingClientRect();
+    const centerX = rect.left + rect.width * 0.5;
+    const centerY = rect.top + rect.height * 0.5;
+    const radius = Math.max(1, Math.min(rect.width, rect.height) * 0.5);
+    let dx = (event.clientX - centerX) / radius;
+    let dy = (event.clientY - centerY) / radius;
+    const length = Math.hypot(dx, dy);
+    if (length > 1) {
+      dx /= length;
+      dy /= length;
+    }
+    if (length < TOUCH_MOVE_DEADZONE) {
+      dx = 0;
+      dy = 0;
+    }
+    this._touchMoveAxis.x = dx;
+    this._touchMoveAxis.y = -dy;
+    if (this._touchMoveKnob) {
+      const knobTravel = radius * 0.45;
+      this._touchMoveKnob.style.setProperty('--knob-x', `${dx * knobTravel}px`);
+      this._touchMoveKnob.style.setProperty('--knob-y', `${dy * knobTravel}px`);
+    }
+  }
+
+  _clearTouchMoveAxis() {
+    this._touchMoveAxis.x = 0;
+    this._touchMoveAxis.y = 0;
+    if (this._touchMoveKnob) {
+      this._touchMoveKnob.style.setProperty('--knob-x', '0px');
+      this._touchMoveKnob.style.setProperty('--knob-y', '0px');
+    }
   }
 }

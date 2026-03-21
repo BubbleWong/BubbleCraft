@@ -16,11 +16,13 @@ const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
 const GROUND_CHECK_OFFSET = 0.04;
 const COLLISION_EPSILON = 1e-3;
+const SOLID_OVERLAP_TOLERANCE = 0.035;
 const COYOTE_TIME = 0.12;
 const LEDGE_DROP_THRESHOLD = 0.18;
 const CROUCH_TRANSITION_SPEED = 12; // units per second
 const MAX_JUMP_ASCENT = 1.4;
 const SAFE_FALL_BLOCKS = 3;
+const OVERLAP_BACKTRACK_STEPS = 8;
 
 export class PlayerController {
   constructor({ scene, world, camera, input, context = null }) {
@@ -58,13 +60,22 @@ export class PlayerController {
     this.mesh.ellipsoid = new BABYLON.Vector3(CAPSULE_RADIUS, ellipsoidY, CAPSULE_RADIUS);
     this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, ellipsoidY, 0);
     
-    // Prevent wall friction/sticking
-    this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-        this.mesh, 
-        BABYLON.PhysicsImpostor.CapsuleImpostor, 
-        { mass: 1, friction: 0, restitution: 0 }, 
-        this.scene
-    );
+    const physicsEnabled = typeof this.scene?.isPhysicsEnabled === 'function'
+      ? this.scene.isPhysicsEnabled()
+      : Boolean(this.scene?.getPhysicsEngine?.());
+    if (physicsEnabled && typeof BABYLON.PhysicsImpostor === 'function') {
+      try {
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+          this.mesh,
+          BABYLON.PhysicsImpostor.CapsuleImpostor,
+          { mass: 1, friction: 0, restitution: 0 },
+          this.scene,
+        );
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to create player physics impostor', error);
+      }
+    }
 
     this.camera.parent = this.mesh;
     this.camera.position.set(0, CAMERA_EYE_HEIGHT, 0);
@@ -80,19 +91,12 @@ export class PlayerController {
     this._groundCheckOrigin = new BABYLON.Vector3();
     this._groundCheckRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, -1, 0), GROUND_CHECK_DISTANCE);
     this._groundPredicate = (mesh) => !!mesh && mesh !== this.mesh && mesh.checkCollisions === true;
+    this._resolveCandidate = new BABYLON.Vector3();
+    this._resolveBacktrack = new BABYLON.Vector3();
     const lateralProbe = Math.max(0.18, CAPSULE_RADIUS * 0.85);
     this._groundCheckOffsets = [
       new BABYLON.Vector3(0, 0, 0),
       new BABYLON.Vector3(lateralProbe, 0, 0),
-      new BABYLON.Vector3(-lateralProbe, 0, 0),
-      new BABYLON.Vector3(0, 0, lateralProbe),
-      new BABYLON.Vector3(0, 0, -lateralProbe),
-      new BABYLON.Vector3(lateralProbe * 0.7, 0, lateralProbe * 0.7),
-      new BABYLON.Vector3(-lateralProbe * 0.7, 0, lateralProbe * 0.7),
-      new BABYLON.Vector3(lateralProbe * 0.7, 0, -lateralProbe * 0.7),
-      new BABYLON.Vector3(-lateralProbe * 0.7, 0, -lateralProbe * 0.7),
-    ];
-    this._grounded = false;
       new BABYLON.Vector3(-lateralProbe, 0, 0),
       new BABYLON.Vector3(0, 0, lateralProbe),
       new BABYLON.Vector3(0, 0, -lateralProbe),
@@ -170,6 +174,14 @@ export class PlayerController {
   }
 
   dispose() {
+    if (this.mesh.physicsImpostor) {
+      try {
+        this.mesh.physicsImpostor.dispose();
+      } catch (error) {
+        // ignore physics cleanup failures
+      }
+      this.mesh.physicsImpostor = null;
+    }
     this.mesh.dispose(false, true);
   }
 
@@ -279,6 +291,7 @@ export class PlayerController {
       }
     }
     this._clampToWorldBounds();
+    this._resolveSolidOverlap(this._previousPosition);
 
     this._actualMovement.copyFrom(this.mesh.position);
     this._actualMovement.subtractInPlace(this._previousPosition);
@@ -518,6 +531,85 @@ export class PlayerController {
   _isPassableBlock(blockType) {
     if (!Number.isFinite(blockType)) return true;
     return blockType === BLOCK_TYPES.air || blockType === BLOCK_TYPES.flower || blockType === BLOCK_TYPES.water;
+  }
+
+  _intersectsSolid(position = this.mesh.position) {
+    if (!this.world?.getBlockAtWorld || !position) return false;
+    const ellipsoid = this.mesh.ellipsoid;
+    const radius = Math.max(0.05, (ellipsoid?.x ?? CAPSULE_RADIUS) - SOLID_OVERLAP_TOLERANCE);
+    const footY = this._footY(position) + SOLID_OVERLAP_TOLERANCE;
+    const headY = footY + Math.max(0.2, this._currentHeight - SOLID_OVERLAP_TOLERANCE * 2);
+
+    const minX = position.x - radius;
+    const maxX = position.x + radius;
+    const minZ = position.z - radius;
+    const maxZ = position.z + radius;
+    const minY = footY;
+    const maxY = headY;
+
+    const startX = Math.floor(minX);
+    const endX = Math.floor(maxX);
+    const startY = Math.floor(minY);
+    const endY = Math.floor(maxY);
+    const startZ = Math.floor(minZ);
+    const endZ = Math.floor(maxZ);
+
+    for (let by = startY; by <= endY; by += 1) {
+      for (let bz = startZ; bz <= endZ; bz += 1) {
+        for (let bx = startX; bx <= endX; bx += 1) {
+          const blockType = this.world.getBlockAtWorld(bx, by, bz);
+          if (this._isPassableBlock(blockType)) continue;
+          const overlapsX = minX < (bx + 1 - COLLISION_EPSILON) && maxX > (bx + COLLISION_EPSILON);
+          const overlapsY = minY < (by + 1 - COLLISION_EPSILON) && maxY > (by + COLLISION_EPSILON);
+          const overlapsZ = minZ < (bz + 1 - COLLISION_EPSILON) && maxZ > (bz + COLLISION_EPSILON);
+          if (overlapsX && overlapsY && overlapsZ) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  _resolveSolidOverlap(previousPosition) {
+    if (!previousPosition || !this._intersectsSolid(this.mesh.position)) return false;
+
+    const currentX = this.mesh.position.x;
+    const currentY = this.mesh.position.y;
+    const currentZ = this.mesh.position.z;
+    const moveX = currentX - previousPosition.x;
+    const moveY = currentY - previousPosition.y;
+    const moveZ = currentZ - previousPosition.z;
+
+    const tryCandidate = (x, y, z) => {
+      this._resolveCandidate.set(x, y, z);
+      if (this._intersectsSolid(this._resolveCandidate)) return false;
+      this.mesh.position.copyFrom(this._resolveCandidate);
+      return true;
+    };
+
+    if (tryCandidate(previousPosition.x, currentY, currentZ)) return true;
+    if (tryCandidate(currentX, currentY, previousPosition.z)) return true;
+    if (tryCandidate(previousPosition.x, currentY, previousPosition.z)) return true;
+    if (tryCandidate(currentX, previousPosition.y, currentZ)) return true;
+    if (tryCandidate(previousPosition.x, previousPosition.y, previousPosition.z)) return true;
+
+    for (let step = 1; step <= OVERLAP_BACKTRACK_STEPS; step += 1) {
+      const t = step / OVERLAP_BACKTRACK_STEPS;
+      this._resolveBacktrack.set(
+        currentX - moveX * t,
+        currentY - moveY * t,
+        currentZ - moveZ * t,
+      );
+      if (!this._intersectsSolid(this._resolveBacktrack)) {
+        this.mesh.position.copyFrom(this._resolveBacktrack);
+        return true;
+      }
+    }
+
+    this.mesh.position.copyFrom(previousPosition);
+    return true;
   }
 
   _snapToGround(force = false) {

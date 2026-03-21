@@ -37,10 +37,11 @@ export class BlockInteraction {
   update(frameInput) {
     const pointerLocked = Boolean(frameInput?.pointerLocked);
     const usingGamepad = Boolean(frameInput?.usingGamepad);
+    const usingTouch = Boolean(frameInput?.usingTouch);
     const gamepadAction = frameInput?.actions;
     
-    // Allow interaction if pointer is locked OR if a gamepad is active
-    if (!pointerLocked && !usingGamepad) {
+    // Allow interaction if a direct aiming mode is active.
+    if (!pointerLocked && !usingGamepad && !usingTouch) {
       this.currentTarget = null;
       this.breakRequested = false;
       this.placeRequested = false;

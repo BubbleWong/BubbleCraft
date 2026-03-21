@@ -16,6 +16,7 @@ const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
 const GROUND_CHECK_OFFSET = 0.04;
 const GROUND_NORMAL_THRESHOLD = 0.55;
+const AIRBORNE_EDGE_SUPPORT_FALL_SPEED = -1.5;
 const COLLISION_EPSILON = 1e-3;
 const SOLID_OVERLAP_TOLERANCE = 0.035;
 const COYOTE_TIME = 0.12;
@@ -99,6 +100,9 @@ export class PlayerController {
     this._resolveBacktrack = new BABYLON.Vector3();
     const lateralProbe = Math.max(0.18, CAPSULE_RADIUS * 0.85);
     const airborneProbe = Math.max(0.1, CAPSULE_RADIUS * 0.35);
+    this._centerGroundCheckOffsets = [
+      new BABYLON.Vector3(0, 0, 0),
+    ];
     this._groundCheckOffsets = [
       new BABYLON.Vector3(0, 0, 0),
       new BABYLON.Vector3(lateralProbe, 0, 0),
@@ -462,14 +466,14 @@ export class PlayerController {
   }
 
   _isGrounded() {
-    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets) return false;
+    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets || !this._centerGroundCheckOffsets) return false;
     const ellipsoid = this.mesh.ellipsoid;
     const offset = this.mesh.ellipsoidOffset;
     if (!ellipsoid || !offset) return false;
     if (this._velocity.y > 0.15) return false;
 
     const rayLength = GROUND_CHECK_DISTANCE + COLLISION_EPSILON;
-    const probeOffsets = this._grounded ? this._groundCheckOffsets : this._airborneGroundCheckOffsets;
+    const probeOffsets = this._getGroundProbeOffsets(false);
     for (const lateral of probeOffsets) {
       this._groundCheckOrigin.copyFrom(this.mesh.position);
       this._groundCheckOrigin.x += lateral.x;
@@ -641,8 +645,20 @@ export class PlayerController {
     return true;
   }
 
+  _getGroundProbeOffsets(force = false) {
+    if (force || this._grounded) {
+      return this._groundCheckOffsets;
+    }
+
+    if (this._velocity.y > AIRBORNE_EDGE_SUPPORT_FALL_SPEED) {
+      return this._centerGroundCheckOffsets;
+    }
+
+    return this._airborneGroundCheckOffsets;
+  }
+
   _snapToGround(force = false) {
-    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets) return;
+    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets || !this._centerGroundCheckOffsets) return;
     const ellipsoid = this.mesh.ellipsoid;
     const offset = this.mesh.ellipsoidOffset;
     if (!ellipsoid || !offset) return;
@@ -651,7 +667,7 @@ export class PlayerController {
     const limit = force ? 0.6 : 0.18;
     let bestTarget = null;
     let bestDiff = Number.POSITIVE_INFINITY;
-    const probeOffsets = force || this._grounded ? this._groundCheckOffsets : this._airborneGroundCheckOffsets;
+    const probeOffsets = this._getGroundProbeOffsets(force);
 
     for (const lateral of probeOffsets) {
       this._groundCheckOrigin.copyFrom(this.mesh.position);

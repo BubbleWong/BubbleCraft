@@ -73,6 +73,7 @@ export class InputManager {
     this._hotbarIndex = 0;
     this._hotbarDirty = true;
     this._toggleHudDetailsRequested = false;
+    this._cycleCameraViewRequested = false;
     this._touchSprintButton = null;
     this._touchCrouchButton = null;
     this._lastPollTime = this._now();
@@ -311,6 +312,7 @@ export class InputManager {
       hotbarIndex: this._hotbarIndex,
       hotbarChanged: this._consumeHotbarDirty(),
       toggleHudDetails: this._consumeToggleHudDetails(),
+      cycleCameraView: this._consumeCycleCameraView(),
       actions,
     };
   }
@@ -407,8 +409,19 @@ export class InputManager {
     return requested;
   }
 
+  _consumeCycleCameraView() {
+    const requested = this._cycleCameraViewRequested;
+    this._cycleCameraViewRequested = false;
+    return requested;
+  }
+
   _onKeyDown(event) {
-    if (!this._pointerLocked && !KEY_BINDINGS.jump.has(event.code) && !this._isLookKey(event.code)) return;
+    const globalAction =
+      event.code === 'F5' ||
+      event.code === 'KeyI' ||
+      event.code === 'KeyC' ||
+      event.code.startsWith('Digit');
+    if (!this._pointerLocked && !KEY_BINDINGS.jump.has(event.code) && !this._isLookKey(event.code) && !globalAction) return;
 
     if (event.repeat) return;
     this._keys.add(event.code);
@@ -456,6 +469,11 @@ export class InputManager {
     if (event.code === 'KeyC') {
       event.preventDefault();
       this._toggleCrouch();
+    }
+
+    if (event.code === 'F5') {
+      event.preventDefault();
+      this._cycleCameraViewRequested = true;
     }
   }
 

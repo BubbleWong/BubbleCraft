@@ -331,7 +331,9 @@ export class GameApp {
         }
 
         this.player.update(delta, frameInput);
-        const forward = this.camera?.getDirection?.(BABYLON.Axis.Z) ?? null;
+        const forward = this.player?.getInteractionDirection?.()
+          ?? this.camera?.getDirection?.(BABYLON.Axis.Z)
+          ?? null;
         this.world?.updateStreaming(this.player.mesh?.position ?? null, forward);
         this.blockInteraction?.update(frameInput);
         if (frameInput.toggleHudDetails) {

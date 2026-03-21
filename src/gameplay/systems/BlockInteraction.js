@@ -101,11 +101,11 @@ export class BlockInteraction {
 
   _pickSolidBlock() {
     if (!this.camera || !this.player?.mesh) return null;
-    const meshPos = this.player.mesh.getAbsolutePosition?.() ?? this.player.mesh.position.clone();
-    const origin = meshPos.clone ? meshPos.clone() : new BABYLON.Vector3(meshPos.x, meshPos.y, meshPos.z);
-    origin.y += this.camera.position?.y ?? 0;
-    this.camera.computeWorldMatrix?.(true);
-    const forwardDir = this.camera.getDirection(BABYLON.Axis.Z).normalize();
+    const origin = this.player.getInteractionOrigin?.()
+      ?? this.player.mesh.getAbsolutePosition?.()
+      ?? this.player.mesh.position.clone();
+    const forwardDir = this.player.getInteractionDirection?.()
+      ?? this.camera.getDirection(BABYLON.Axis.Z).normalize();
     const forwardRay = new BABYLON.Ray(origin, forwardDir, MAX_INTERACT_DISTANCE);
     // if (this.breakRequested || this.placeRequested) {
     //   console.log('[blockInteraction] ray', { origin: origin.asArray?.() ?? origin, dir: forwardDir.asArray?.() ?? forwardDir });

@@ -11,6 +11,13 @@ const CAMERA_EYE_HEIGHT = 1.62;
 const CROUCH_HEIGHT = 1.3;
 const CROUCH_CAMERA_HEIGHT = 1.2;
 const CROUCH_SPEED_MULTIPLIER = 0.3;
+const CAMERA_VIEW_FIRST_PERSON = 0;
+const CAMERA_VIEW_THIRD_PERSON_BACK = 1;
+const CAMERA_VIEW_THIRD_PERSON_FRONT = 2;
+const CAMERA_VIEW_COUNT = 3;
+const THIRD_PERSON_CAMERA_DISTANCE = 4.2;
+const THIRD_PERSON_CAMERA_HEIGHT = 0.32;
+const THIRD_PERSON_CAMERA_COLLISION_PADDING = 0.18;
 const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
@@ -79,9 +86,16 @@ export class PlayerController {
       }
     }
 
-    this.camera.parent = this.mesh;
-    this.camera.position.set(0, CAMERA_EYE_HEIGHT, 0);
+    this._cameraViewMode = CAMERA_VIEW_FIRST_PERSON;
+    this._cameraMount = new BABYLON.TransformNode('player-camera-mount', this.scene);
+    this._cameraMount.parent = this.mesh;
+    this._cameraMount.position.set(0, CAMERA_EYE_HEIGHT, 0);
+    this._cameraMount.rotation.set(0, 0, 0);
+
+    this.camera.parent = this._cameraMount;
+    this.camera.position.set(0, 0, 0);
     this.camera.rotationQuaternion = null;
+    this.camera.rotation.set(0, 0, 0);
 
     this._velocity = new BABYLON.Vector3();
     this._spawnPoint = new BABYLON.Vector3(0, CAPSULE_HEIGHT, 0);
@@ -93,9 +107,17 @@ export class PlayerController {
     this._previousPosition = new BABYLON.Vector3();
     this._movementStageStart = new BABYLON.Vector3();
     this._actualMovement = new BABYLON.Vector3();
+    this._cameraTarget = new BABYLON.Vector3();
+    this._cameraDesiredOffset = new BABYLON.Vector3();
+    this._cameraDesiredWorld = new BABYLON.Vector3();
+    this._cameraCollisionDirection = new BABYLON.Vector3();
+    this._interactionOrigin = new BABYLON.Vector3();
+    this._interactionDirection = new BABYLON.Vector3();
     this._groundCheckOrigin = new BABYLON.Vector3();
     this._groundCheckRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, -1, 0), GROUND_CHECK_DISTANCE);
     this._groundPredicate = (mesh) => !!mesh && mesh !== this.mesh && mesh.checkCollisions === true;
+    this._cameraCollisionRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, -1), THIRD_PERSON_CAMERA_DISTANCE);
+    this._cameraCollisionPredicate = (mesh) => !!mesh && mesh !== this.mesh && mesh.checkCollisions === true;
     this._resolveCandidate = new BABYLON.Vector3();
     this._resolveBacktrack = new BABYLON.Vector3();
     const lateralProbe = Math.max(0.18, CAPSULE_RADIUS * 0.85);
@@ -125,9 +147,17 @@ export class PlayerController {
     this._timeSinceGrounded = 0;
     this._lastGroundFootY = 0;
     this._fallStartFootY = 0;
+    this._walkCycle = 0;
+    this._limbSwing = 0;
+    this._crouchVisual = 0;
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
+    this._createAvatar();
+    this._syncAvatarTransform();
     this._lastGroundFootY = this._footY();
     this._fallStartFootY = Math.floor(this._lastGroundFootY);
+    this._updateAvatarVisibility();
+    this._updateAvatarPose(0, 0);
+    this._updateCameraView();
   }
 
   setSpawnPoint(position) {
@@ -147,22 +177,31 @@ export class PlayerController {
     }
     this._lastGroundFootY = this._footY();
     this._fallStartFootY = Math.floor(this._lastGroundFootY);
+    this._syncAvatarTransform();
+    this._updateAvatarPose(0, 0);
+    this._updateCameraView();
   }
 
   setOrientation({ yaw, pitch }) {
-    if (Number.isFinite(yaw)) {
-      this.mesh.rotation.y = yaw;
-    }
-    if (Number.isFinite(pitch)) {
-      this.camera.rotation.x = Math.max(-(Math.PI * 0.49), Math.min(Math.PI * 0.49, pitch));
-    }
+    this._applyCameraOrientation({
+      yaw: Number.isFinite(yaw) ? yaw : this.mesh.rotation.y,
+      pitch: Number.isFinite(pitch) ? pitch : this._cameraMount.rotation.x,
+    });
+    this._updateCameraView();
   }
 
   update(deltaSeconds, frameInput = null) {
     const inputState = frameInput ?? this.input.poll();
+    if (inputState.cycleCameraView) {
+      this.cycleCameraView();
+    }
     this._applyCameraOrientation(inputState.look);
     this._updateCrouchTransition(deltaSeconds);
     this._integrateMovement(deltaSeconds, inputState);
+    this._syncAvatarTransform();
+    const horizontalDistance = Math.hypot(this._actualMovement.x, this._actualMovement.z);
+    this._updateAvatarPose(deltaSeconds, horizontalDistance);
+    this._updateCameraView();
 
     if (this.mesh.position.y < -64) {
       this.respawn();
@@ -186,10 +225,17 @@ export class PlayerController {
     }
     this._lastGroundFootY = this._footY();
     this._fallStartFootY = Math.floor(this._lastGroundFootY);
+    this._syncAvatarTransform();
+    this._updateAvatarPose(0, 0);
+    this._updateCameraView();
     this.eventBus?.emit('player:respawn', { position: this.mesh.position.clone(), player: this });
   }
 
   dispose() {
+    this._avatarRoot?.dispose?.(false, true);
+    this._avatarRoot = null;
+    this._cameraMount?.dispose?.();
+    this._cameraMount = null;
     if (this.mesh.physicsImpostor) {
       try {
         this.mesh.physicsImpostor.dispose();
@@ -206,9 +252,9 @@ export class PlayerController {
     this.mesh.rotation.y = yaw;
 
     const clampedPitch = Math.max(-(Math.PI * 0.49), Math.min(Math.PI * 0.49, pitch));
-    this.camera.rotation.x = clampedPitch;
-    this.camera.rotation.y = 0;
-    this.camera.rotation.z = 0;
+    this._cameraMount.rotation.x = clampedPitch;
+    this._cameraMount.rotation.y = 0;
+    this._cameraMount.rotation.z = 0;
   }
 
   _integrateMovement(deltaSeconds, inputState) {
@@ -402,6 +448,219 @@ export class PlayerController {
     });
   }
 
+  cycleCameraView() {
+    this._cameraViewMode = (this._cameraViewMode + 1) % CAMERA_VIEW_COUNT;
+    this._updateAvatarVisibility();
+    this._updateCameraView();
+  }
+
+  _updateCameraView() {
+    if (!this.camera || !this._cameraMount) return;
+
+    this.camera.rotationQuaternion = null;
+    if (this._cameraViewMode === CAMERA_VIEW_FIRST_PERSON) {
+      this.camera.position.set(0, 0, 0);
+      this.camera.rotation.set(0, 0, 0);
+      return;
+    }
+
+    const inFront = this._cameraViewMode === CAMERA_VIEW_THIRD_PERSON_FRONT;
+    this._cameraDesiredOffset.set(
+      0,
+      THIRD_PERSON_CAMERA_HEIGHT,
+      inFront ? THIRD_PERSON_CAMERA_DISTANCE : -THIRD_PERSON_CAMERA_DISTANCE,
+    );
+
+    const scale = this._resolveCameraOffsetScale(this._cameraDesiredOffset);
+    this.camera.position.copyFrom(this._cameraDesiredOffset);
+    if (scale < 1) {
+      this.camera.position.scaleInPlace(scale);
+    }
+
+    this.camera.rotation.set(0, inFront ? Math.PI : 0, 0);
+  }
+
+  _resolveCameraOffsetScale(desiredOffset) {
+    if (!this.scene || !this._cameraMount) return 1;
+
+    this._cameraMount.computeWorldMatrix(true);
+    BABYLON.Vector3.TransformCoordinatesToRef(
+      desiredOffset,
+      this._cameraMount.getWorldMatrix(),
+      this._cameraDesiredWorld,
+    );
+
+    this._cameraCollisionDirection.copyFrom(this._cameraDesiredWorld);
+    this._cameraCollisionDirection.subtractInPlace(this._cameraMount.getAbsolutePosition());
+    const distance = this._cameraCollisionDirection.length();
+    if (distance <= COLLISION_EPSILON) return 1;
+
+    this._cameraCollisionDirection.scaleInPlace(1 / distance);
+    this._cameraCollisionRay.origin.copyFrom(this._cameraMount.getAbsolutePosition());
+    this._cameraCollisionRay.direction.copyFrom(this._cameraCollisionDirection);
+    this._cameraCollisionRay.length = distance;
+
+    const pick = this.scene.pickWithRay(this._cameraCollisionRay, this._cameraCollisionPredicate, true);
+    if (!pick?.hit || pick.distance >= distance) {
+      return 1;
+    }
+
+    const clipped = Math.max(0.35, pick.distance - THIRD_PERSON_CAMERA_COLLISION_PADDING);
+    return Math.min(1, clipped / distance);
+  }
+
+  _updateAvatarVisibility() {
+    this._avatarRoot?.setEnabled?.(this._cameraViewMode !== CAMERA_VIEW_FIRST_PERSON);
+  }
+
+  _syncAvatarTransform() {
+    if (!this._avatarRoot || !this.mesh) return;
+    this._avatarRoot.position.copyFrom(this.mesh.position);
+    this._avatarRoot.rotation.x = 0;
+    this._avatarRoot.rotation.y = this.mesh.rotation.y;
+    this._avatarRoot.rotation.z = 0;
+  }
+
+  _createAvatar() {
+    if (!this.scene || !this.mesh) return;
+
+    const makeMaterial = (name, color) => {
+      const material = new BABYLON.StandardMaterial(name, this.scene);
+      material.diffuseColor = color;
+      material.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+      return material;
+    };
+
+    const makePart = (name, options, material, position) => {
+      const mesh = BABYLON.MeshBuilder.CreateBox(name, options, this.scene);
+      mesh.parent = this._avatarRoot;
+      mesh.position.copyFrom(position);
+      mesh.material = material;
+      mesh.isPickable = false;
+      mesh.checkCollisions = false;
+      return mesh;
+    };
+
+    this._avatarRoot = new BABYLON.TransformNode('player-avatar-root', this.scene);
+    this._avatarRoot.position.copyFrom(this.mesh.position);
+    this._avatarRoot.rotation.set(0, this.mesh.rotation.y, 0);
+
+    const skin = makeMaterial('player-skin', new BABYLON.Color3(0.96, 0.82, 0.69));
+    const shirt = makeMaterial('player-shirt', new BABYLON.Color3(0.2, 0.58, 0.92));
+    const pants = makeMaterial('player-pants', new BABYLON.Color3(0.18, 0.24, 0.5));
+    const hair = makeMaterial('player-hair', new BABYLON.Color3(0.22, 0.15, 0.08));
+    const boots = makeMaterial('player-boots', new BABYLON.Color3(0.12, 0.11, 0.12));
+
+    this._avatarBody = makePart(
+      'player-body',
+      { width: 0.72, height: 0.82, depth: 0.36 },
+      shirt,
+      new BABYLON.Vector3(0, 1.12, 0),
+    );
+    this._avatarHead = makePart(
+      'player-head',
+      { width: 0.62, height: 0.62, depth: 0.62 },
+      skin,
+      new BABYLON.Vector3(0, 1.74, 0),
+    );
+    this._avatarHair = makePart(
+      'player-hair',
+      { width: 0.64, height: 0.18, depth: 0.64 },
+      hair,
+      new BABYLON.Vector3(0, 2.0, 0),
+    );
+    this._avatarLeftArm = makePart(
+      'player-left-arm',
+      { width: 0.22, height: 0.78, depth: 0.22 },
+      skin,
+      new BABYLON.Vector3(-0.48, 1.12, 0),
+    );
+    this._avatarRightArm = makePart(
+      'player-right-arm',
+      { width: 0.22, height: 0.78, depth: 0.22 },
+      skin,
+      new BABYLON.Vector3(0.48, 1.12, 0),
+    );
+    this._avatarLeftLeg = makePart(
+      'player-left-leg',
+      { width: 0.26, height: 0.8, depth: 0.26 },
+      pants,
+      new BABYLON.Vector3(-0.16, 0.4, 0),
+    );
+    this._avatarRightLeg = makePart(
+      'player-right-leg',
+      { width: 0.26, height: 0.8, depth: 0.26 },
+      pants,
+      new BABYLON.Vector3(0.16, 0.4, 0),
+    );
+    this._avatarLeftBoot = makePart(
+      'player-left-boot',
+      { width: 0.28, height: 0.16, depth: 0.3 },
+      boots,
+      new BABYLON.Vector3(-0.16, 0.02, 0),
+    );
+    this._avatarRightBoot = makePart(
+      'player-right-boot',
+      { width: 0.28, height: 0.16, depth: 0.3 },
+      boots,
+      new BABYLON.Vector3(0.16, 0.02, 0),
+    );
+  }
+
+  _updateAvatarPose(deltaSeconds, horizontalDistance) {
+    if (!this._avatarRoot) return;
+
+    const moving = this._grounded && horizontalDistance > FOOTSTEP_MIN_DISTANCE;
+    if (moving) {
+      this._walkCycle += Math.max(0, horizontalDistance * 6.5);
+    }
+
+    const swingTarget = moving ? Math.sin(this._walkCycle) * 0.7 : 0;
+    const poseLerp = Math.min(1, Math.max(0, deltaSeconds * 12));
+    this._limbSwing += (swingTarget - this._limbSwing) * poseLerp;
+    const crouchTarget = this._isCrouching ? 1 : 0;
+    this._crouchVisual += (crouchTarget - this._crouchVisual) * poseLerp;
+
+    const crouchDrop = this._crouchVisual * 0.28;
+    const armLift = this._crouchVisual * 0.18;
+    const legShift = this._crouchVisual * 0.06;
+
+    this._avatarBody.position.y = 1.12 - crouchDrop;
+    this._avatarHead.position.y = 1.74 - crouchDrop * 0.92;
+    this._avatarHair.position.y = 2.0 - crouchDrop * 0.92;
+    this._avatarLeftArm.position.y = 1.12 - crouchDrop * 0.85;
+    this._avatarRightArm.position.y = 1.12 - crouchDrop * 0.85;
+    this._avatarLeftLeg.position.y = 0.4 - legShift;
+    this._avatarRightLeg.position.y = 0.4 - legShift;
+    this._avatarLeftBoot.position.y = 0.02 - legShift;
+    this._avatarRightBoot.position.y = 0.02 - legShift;
+
+    this._avatarHead.rotation.x = this._cameraMount.rotation.x * 0.35;
+    this._avatarLeftArm.rotation.x = this._limbSwing - armLift;
+    this._avatarRightArm.rotation.x = -this._limbSwing - armLift;
+    this._avatarLeftLeg.rotation.x = -this._limbSwing;
+    this._avatarRightLeg.rotation.x = this._limbSwing;
+  }
+
+  getInteractionOrigin() {
+    if (!this._cameraMount) return this.mesh.position.clone();
+    this._cameraMount.computeWorldMatrix(true);
+    this._interactionOrigin.copyFrom(this._cameraMount.getAbsolutePosition());
+    return this._interactionOrigin.clone();
+  }
+
+  getInteractionDirection() {
+    if (!this._cameraMount) return new BABYLON.Vector3(0, 0, 1);
+    this._cameraMount.computeWorldMatrix(true);
+    BABYLON.Vector3.TransformNormalToRef(
+      BABYLON.Axis.Z,
+      this._cameraMount.getWorldMatrix(),
+      this._interactionDirection,
+    );
+    this._interactionDirection.normalize();
+    return this._interactionDirection.clone();
+  }
+
   _clampToWorldBounds() {
     const maxRadius = this.world?.maxChunkRadius;
     if (!Number.isFinite(maxRadius)) return;
@@ -439,7 +698,7 @@ export class PlayerController {
     const halfHeight = height * 0.5;
     this.mesh.ellipsoid.y = halfHeight;
     this.mesh.ellipsoidOffset.y = halfHeight;
-    this.camera.position.y = eyeHeight;
+    this._cameraMount.position.y = eyeHeight;
     this._currentHeight = height;
   }
 
@@ -562,9 +821,9 @@ export class PlayerController {
     const maxStep = CROUCH_TRANSITION_SPEED * deltaSeconds;
     const applied = Math.abs(heightDiff) <= maxStep ? heightDiff : Math.sign(heightDiff) * maxStep;
     const nextHeight = this._currentHeight + applied;
-    const cameraDiff = this._targetCameraHeight - this.camera.position.y;
+    const cameraDiff = this._targetCameraHeight - this._cameraMount.position.y;
     const cameraApplied = Math.abs(cameraDiff) <= maxStep ? cameraDiff : Math.sign(cameraDiff) * maxStep;
-    const nextCamera = this.camera.position.y + cameraApplied;
+    const nextCamera = this._cameraMount.position.y + cameraApplied;
 
     this._setColliderHeight(nextHeight, nextCamera);
   }

@@ -15,6 +15,7 @@ const FOOTSTEP_DISTANCE_INTERVAL = 2.2;
 const FOOTSTEP_MIN_DISTANCE = 0.01;
 const GROUND_CHECK_DISTANCE = 0.22;
 const GROUND_CHECK_OFFSET = 0.04;
+const GROUND_NORMAL_THRESHOLD = 0.55;
 const COLLISION_EPSILON = 1e-3;
 const SOLID_OVERLAP_TOLERANCE = 0.035;
 const COYOTE_TIME = 0.12;
@@ -86,7 +87,10 @@ export class PlayerController {
     this._footstepAccumulator = 0;
     this._desiredMove = new BABYLON.Vector3();
     this._movementDelta = new BABYLON.Vector3();
+    this._horizontalDelta = new BABYLON.Vector3();
+    this._verticalDelta = new BABYLON.Vector3();
     this._previousPosition = new BABYLON.Vector3();
+    this._movementStageStart = new BABYLON.Vector3();
     this._actualMovement = new BABYLON.Vector3();
     this._groundCheckOrigin = new BABYLON.Vector3();
     this._groundCheckRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, -1, 0), GROUND_CHECK_DISTANCE);
@@ -94,6 +98,7 @@ export class PlayerController {
     this._resolveCandidate = new BABYLON.Vector3();
     this._resolveBacktrack = new BABYLON.Vector3();
     const lateralProbe = Math.max(0.18, CAPSULE_RADIUS * 0.85);
+    const airborneProbe = Math.max(0.1, CAPSULE_RADIUS * 0.35);
     this._groundCheckOffsets = [
       new BABYLON.Vector3(0, 0, 0),
       new BABYLON.Vector3(lateralProbe, 0, 0),
@@ -104,6 +109,13 @@ export class PlayerController {
       new BABYLON.Vector3(-lateralProbe * 0.7, 0, lateralProbe * 0.7),
       new BABYLON.Vector3(lateralProbe * 0.7, 0, -lateralProbe * 0.7),
       new BABYLON.Vector3(-lateralProbe * 0.7, 0, -lateralProbe * 0.7),
+    ];
+    this._airborneGroundCheckOffsets = [
+      new BABYLON.Vector3(0, 0, 0),
+      new BABYLON.Vector3(airborneProbe, 0, 0),
+      new BABYLON.Vector3(-airborneProbe, 0, 0),
+      new BABYLON.Vector3(0, 0, airborneProbe),
+      new BABYLON.Vector3(0, 0, -airborneProbe),
     ];
     this._grounded = false;
     this._timeSinceGrounded = 0;
@@ -280,23 +292,38 @@ export class PlayerController {
 
     this._previousPosition.copyFrom(this.mesh.position);
     const previousFootY = this._footY(this._previousPosition);
-    this.mesh.moveWithCollisions(delta);
-    let postMoveFootY = this._footY();
-    if (!this._grounded && postMoveFootY > maxAllowedFootY + COLLISION_EPSILON) {
-      const correction = postMoveFootY - (maxAllowedFootY + COLLISION_EPSILON);
-      this.mesh.position.y -= correction;
-      postMoveFootY = this._footY();
-      if (this._velocity.y > 0) {
-        this._velocity.y = 0;
-      }
+    const expectedY = delta.y;
+
+    this._horizontalDelta.set(delta.x, 0, delta.z);
+    if (Math.abs(delta.x) > COLLISION_EPSILON || Math.abs(delta.z) > COLLISION_EPSILON) {
+      this.mesh.moveWithCollisions(this._horizontalDelta);
+      this._clampToWorldBounds();
+      this._resolveSolidOverlap(this._previousPosition);
     }
+
+    let postMoveFootY = this._footY();
+
+    this._verticalDelta.set(0, expectedY, 0);
+    if (Math.abs(expectedY) > COLLISION_EPSILON) {
+      this._movementStageStart.copyFrom(this.mesh.position);
+      this.mesh.moveWithCollisions(this._verticalDelta);
+      postMoveFootY = this._footY();
+      if (!this._grounded && postMoveFootY > maxAllowedFootY + COLLISION_EPSILON) {
+        const correction = postMoveFootY - (maxAllowedFootY + COLLISION_EPSILON);
+        this.mesh.position.y -= correction;
+        postMoveFootY = this._footY();
+        if (this._velocity.y > 0) {
+          this._velocity.y = 0;
+        }
+      }
+      this._resolveSolidOverlap(this._movementStageStart);
+    }
+
     this._clampToWorldBounds();
-    this._resolveSolidOverlap(this._previousPosition);
 
     this._actualMovement.copyFrom(this.mesh.position);
     this._actualMovement.subtractInPlace(this._previousPosition);
 
-    const expectedY = delta.y;
     const actualY = this._actualMovement.y;
 
     let groundedAfter = this._isGrounded();
@@ -435,14 +462,15 @@ export class PlayerController {
   }
 
   _isGrounded() {
-    if (!this.scene || !this.mesh || !this._groundCheckOffsets) return false;
+    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets) return false;
     const ellipsoid = this.mesh.ellipsoid;
     const offset = this.mesh.ellipsoidOffset;
     if (!ellipsoid || !offset) return false;
     if (this._velocity.y > 0.15) return false;
 
     const rayLength = GROUND_CHECK_DISTANCE + COLLISION_EPSILON;
-    for (const lateral of this._groundCheckOffsets) {
+    const probeOffsets = this._grounded ? this._groundCheckOffsets : this._airborneGroundCheckOffsets;
+    for (const lateral of probeOffsets) {
       this._groundCheckOrigin.copyFrom(this.mesh.position);
       this._groundCheckOrigin.x += lateral.x;
       this._groundCheckOrigin.z += lateral.z;
@@ -453,7 +481,8 @@ export class PlayerController {
       this._groundCheckRay.length = rayLength;
 
       const pick = this.scene.pickWithRay(this._groundCheckRay, this._groundPredicate, true);
-      if (pick?.hit && pick.distance <= rayLength) {
+      const normal = pick?.getNormal?.(true, true);
+      if (pick?.hit && pick.distance <= rayLength && (normal?.y ?? 0) >= GROUND_NORMAL_THRESHOLD) {
         return true;
       }
     }
@@ -613,7 +642,7 @@ export class PlayerController {
   }
 
   _snapToGround(force = false) {
-    if (!this.scene || !this.mesh || !this._groundCheckOffsets) return;
+    if (!this.scene || !this.mesh || !this._groundCheckOffsets || !this._airborneGroundCheckOffsets) return;
     const ellipsoid = this.mesh.ellipsoid;
     const offset = this.mesh.ellipsoidOffset;
     if (!ellipsoid || !offset) return;
@@ -622,8 +651,9 @@ export class PlayerController {
     const limit = force ? 0.6 : 0.18;
     let bestTarget = null;
     let bestDiff = Number.POSITIVE_INFINITY;
+    const probeOffsets = force || this._grounded ? this._groundCheckOffsets : this._airborneGroundCheckOffsets;
 
-    for (const lateral of this._groundCheckOffsets) {
+    for (const lateral of probeOffsets) {
       this._groundCheckOrigin.copyFrom(this.mesh.position);
       this._groundCheckOrigin.x += lateral.x;
       this._groundCheckOrigin.z += lateral.z;
@@ -635,6 +665,8 @@ export class PlayerController {
 
       const pick = this.scene.pickWithRay(this._groundCheckRay, this._groundPredicate, true);
       if (!pick?.hit) continue;
+      const normal = pick.getNormal?.(true, true);
+      if ((normal?.y ?? 0) < GROUND_NORMAL_THRESHOLD) continue;
 
       const targetY = pick.pickedPoint.y - offset.y + ellipsoid.y;
       const diff = targetY - this.mesh.position.y;

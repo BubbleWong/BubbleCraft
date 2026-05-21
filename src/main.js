@@ -1,4 +1,4 @@
-import { GameApp } from './core/GameApp.js';
+import { GameApp } from './core/GameApp.js?v=character-redesign-2';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');

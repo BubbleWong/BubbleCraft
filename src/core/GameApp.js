@@ -1,5 +1,5 @@
 import { InputManager } from '../input/InputManager.js';
-import { PlayerController } from '../gameplay/entities/player/PlayerController.js';
+import { PlayerController } from '../gameplay/entities/player/PlayerController.js?v=character-redesign-2';
 import { VoxelWorld } from '../world/VoxelWorld.js';
 import { HudManager } from '../ui/HudManager.js';
 import { BlockInteraction } from '../gameplay/systems/BlockInteraction.js';
@@ -252,11 +252,13 @@ export class GameApp {
         const evt = pointerInfo.event;
         if (evt.button === 0) {
           // console.log('[pointer] queue break');
+          this.player?.triggerActionAnimation?.('mine');
           this.blockInteraction?.queueBreak();
         } else if (evt.button === 2) {
           evt.preventDefault();
           // console.log('[pointer] queue place');
-      this.blockInteraction?.queuePlace();
+          this.player?.triggerActionAnimation?.('place');
+          this.blockInteraction?.queuePlace();
         }
       });
     }

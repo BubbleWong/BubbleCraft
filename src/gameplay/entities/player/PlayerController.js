@@ -158,9 +158,12 @@ export class PlayerController {
     this._walkCycle = 0;
     this._limbSwing = 0;
     this._crouchVisual = 0;
+    this._runVisual = 0;
+    this._jumpVisual = 0;
     this._actionSwingTime = 0;
     this._actionSwingRepeatTimer = 0;
     this._actionActiveLastFrame = false;
+    this._activeActionType = 'mine';
     this._animationDisposers = [];
     this._setColliderHeight(this.standHeight, this.standCameraHeight);
     this._createAvatar();
@@ -206,18 +209,22 @@ export class PlayerController {
 
   update(deltaSeconds, frameInput = null) {
     const inputState = frameInput ?? this.input.poll();
-    const actionActive = Boolean(inputState.actions?.break || inputState.actions?.place);
+    const actionType = inputState.actions?.break
+      ? 'mine'
+      : inputState.actions?.place
+        ? 'place'
+        : null;
     if (inputState.cycleCameraView) {
       this.cycleCameraView();
     }
-    this._updateActionSwing(deltaSeconds, actionActive);
+    this._updateActionSwing(deltaSeconds, actionType);
     this._applyCameraOrientation(inputState.look);
     this._updateCrouchTransition(deltaSeconds);
     this._integrateMovement(deltaSeconds, inputState);
     this._syncAvatarTransform();
     const horizontalDistance = Math.hypot(this._actualMovement.x, this._actualMovement.z);
-    this._updateAvatarPose(deltaSeconds, horizontalDistance);
-    this._updateFirstPersonHands(deltaSeconds, horizontalDistance);
+    this._updateAvatarPose(deltaSeconds, horizontalDistance, inputState);
+    this._updateFirstPersonHands(deltaSeconds, horizontalDistance, inputState);
     this._updateCameraView();
 
     if (this.mesh.position.y < -64) {
@@ -552,22 +559,28 @@ export class PlayerController {
   _bindAnimationEvents() {
     if (!this.eventBus?.on) return;
     this._animationDisposers.push(
-      this.eventBus.on('block:break', () => this._triggerActionSwing()),
-      this.eventBus.on('block:place', () => this._triggerActionSwing()),
+      this.eventBus.on('block:break', () => this._triggerActionSwing('mine')),
+      this.eventBus.on('block:place', () => this._triggerActionSwing('place')),
     );
   }
 
-  _triggerActionSwing() {
+  triggerActionAnimation(type = 'mine') {
+    this._triggerActionSwing(type);
+  }
+
+  _triggerActionSwing(type = 'mine') {
+    this._activeActionType = type === 'place' ? 'place' : 'mine';
     this._actionSwingTime = ACTION_SWING_DURATION;
   }
 
-  _updateActionSwing(deltaSeconds, actionActive) {
+  _updateActionSwing(deltaSeconds, actionType) {
     this._actionSwingTime = Math.max(0, this._actionSwingTime - deltaSeconds);
     this._actionSwingRepeatTimer = Math.max(0, this._actionSwingRepeatTimer - deltaSeconds);
 
+    const actionActive = Boolean(actionType);
     if (actionActive) {
       if (!this._actionActiveLastFrame || this._actionSwingRepeatTimer <= 0) {
-        this._triggerActionSwing();
+        this._triggerActionSwing(actionType);
         this._actionSwingRepeatTimer = ACTION_SWING_REPEAT_INTERVAL;
       }
     } else {
@@ -592,13 +605,21 @@ export class PlayerController {
       return material;
     };
 
-    const makePart = (name, options, material, position) => {
+    const makePivot = (name, parent, position) => {
+      const node = new BABYLON.TransformNode(name, this.scene);
+      node.parent = parent;
+      node.position.copyFrom(position);
+      return node;
+    };
+
+    const makePart = (name, parent, options, material, position) => {
       const mesh = BABYLON.MeshBuilder.CreateBox(name, options, this.scene);
-      mesh.parent = this._avatarRoot;
+      mesh.parent = parent;
       mesh.position.copyFrom(position);
       mesh.material = material;
       mesh.isPickable = false;
       mesh.checkCollisions = false;
+      mesh.alwaysSelectAsActiveMesh = true;
       return mesh;
     };
 
@@ -607,64 +628,251 @@ export class PlayerController {
     this._avatarRoot.rotation.set(0, this.mesh.rotation.y, 0);
 
     const skin = makeMaterial('player-skin', new BABYLON.Color3(0.96, 0.82, 0.69));
-    const shirt = makeMaterial('player-shirt', new BABYLON.Color3(0.2, 0.58, 0.92));
-    const pants = makeMaterial('player-pants', new BABYLON.Color3(0.18, 0.24, 0.5));
+    const skinShade = makeMaterial('player-skin-shade', new BABYLON.Color3(0.78, 0.55, 0.42));
+    const shirt = makeMaterial('player-shirt', new BABYLON.Color3(0.18, 0.58, 0.82));
+    const jacket = makeMaterial('player-jacket', new BABYLON.Color3(0.08, 0.28, 0.38));
+    const pack = makeMaterial('player-pack', new BABYLON.Color3(0.28, 0.19, 0.1));
+    const packTrim = makeMaterial('player-pack-trim', new BABYLON.Color3(0.48, 0.34, 0.18));
+    const pants = makeMaterial('player-pants', new BABYLON.Color3(0.14, 0.2, 0.46));
     const hair = makeMaterial('player-hair', new BABYLON.Color3(0.22, 0.15, 0.08));
     const boots = makeMaterial('player-boots', new BABYLON.Color3(0.12, 0.11, 0.12));
+    const eye = makeMaterial('player-eye', new BABYLON.Color3(0.04, 0.04, 0.04));
+    const belt = makeMaterial('player-belt', new BABYLON.Color3(0.1, 0.08, 0.06));
+    const buckle = makeMaterial('player-buckle', new BABYLON.Color3(0.86, 0.62, 0.18));
 
     this._avatarBody = makePart(
       'player-body',
+      this._avatarRoot,
       { width: 0.72, height: 0.82, depth: 0.36 },
       shirt,
       new BABYLON.Vector3(0, 1.12, 0),
     );
+    this._avatarJacketLeft = makePart(
+      'player-jacket-left',
+      this._avatarBody,
+      { width: 0.22, height: 0.76, depth: 0.024 },
+      jacket,
+      new BABYLON.Vector3(-0.21, 0.02, 0.19),
+    );
+    this._avatarJacketRight = makePart(
+      'player-jacket-right',
+      this._avatarBody,
+      { width: 0.22, height: 0.76, depth: 0.024 },
+      jacket,
+      new BABYLON.Vector3(0.21, 0.02, 0.19),
+    );
+    this._avatarJacketBack = makePart(
+      'player-jacket-back',
+      this._avatarBody,
+      { width: 0.64, height: 0.72, depth: 0.03 },
+      jacket,
+      new BABYLON.Vector3(0, 0.02, -0.2),
+    );
+    this._avatarBackpack = makePart(
+      'player-backpack',
+      this._avatarBody,
+      { width: 0.52, height: 0.52, depth: 0.16 },
+      pack,
+      new BABYLON.Vector3(0, 0.05, -0.32),
+    );
+    this._avatarBackpackFlap = makePart(
+      'player-backpack-flap',
+      this._avatarBackpack,
+      { width: 0.44, height: 0.12, depth: 0.03 },
+      packTrim,
+      new BABYLON.Vector3(0, 0.16, -0.095),
+    );
+    this._avatarBackpackPocket = makePart(
+      'player-backpack-pocket',
+      this._avatarBackpack,
+      { width: 0.3, height: 0.18, depth: 0.035 },
+      packTrim,
+      new BABYLON.Vector3(0, -0.12, -0.095),
+    );
+    this._avatarBackStrapLeft = makePart(
+      'player-back-strap-left',
+      this._avatarBody,
+      { width: 0.08, height: 0.74, depth: 0.034 },
+      packTrim,
+      new BABYLON.Vector3(-0.2, 0.0, -0.215),
+    );
+    this._avatarBackStrapRight = makePart(
+      'player-back-strap-right',
+      this._avatarBody,
+      { width: 0.08, height: 0.74, depth: 0.034 },
+      packTrim,
+      new BABYLON.Vector3(0.2, 0.0, -0.215),
+    );
+    this._avatarShirtStripe = makePart(
+      'player-shirt-stripe',
+      this._avatarBody,
+      { width: 0.06, height: 0.72, depth: 0.028 },
+      new BABYLON.StandardMaterial('player-shirt-stripe-material', this.scene),
+      new BABYLON.Vector3(0, 0.03, 0.2),
+    );
+    this._avatarShirtStripe.material.diffuseColor = new BABYLON.Color3(0.12, 0.38, 0.56);
+    this._avatarShirtStripe.material.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+    this._avatarBelt = makePart(
+      'player-belt',
+      this._avatarBody,
+      { width: 0.74, height: 0.08, depth: 0.03 },
+      belt,
+      new BABYLON.Vector3(0, -0.35, 0.2),
+    );
+    this._avatarBuckle = makePart(
+      'player-buckle',
+      this._avatarBody,
+      { width: 0.12, height: 0.1, depth: 0.034 },
+      buckle,
+      new BABYLON.Vector3(0, -0.35, 0.215),
+    );
+
+    this._avatarHeadPivot = makePivot('player-head-pivot', this._avatarRoot, new BABYLON.Vector3(0, 1.44, 0));
     this._avatarHead = makePart(
       'player-head',
+      this._avatarHeadPivot,
       { width: 0.62, height: 0.62, depth: 0.62 },
       skin,
-      new BABYLON.Vector3(0, 1.74, 0),
+      new BABYLON.Vector3(0, 0.3, 0),
     );
     this._avatarHair = makePart(
       'player-hair',
-      { width: 0.64, height: 0.18, depth: 0.64 },
+      this._avatarHeadPivot,
+      { width: 0.66, height: 0.14, depth: 0.66 },
       hair,
-      new BABYLON.Vector3(0, 2.0, 0),
+      new BABYLON.Vector3(0, 0.64, 0),
+    );
+    this._avatarHairFront = makePart(
+      'player-hair-front',
+      this._avatarHeadPivot,
+      { width: 0.66, height: 0.16, depth: 0.08 },
+      hair,
+      new BABYLON.Vector3(0, 0.48, 0.34),
+    );
+    this._avatarHairLeft = makePart(
+      'player-hair-left',
+      this._avatarHeadPivot,
+      { width: 0.08, height: 0.34, depth: 0.66 },
+      hair,
+      new BABYLON.Vector3(-0.34, 0.34, 0),
+    );
+    this._avatarHairRight = makePart(
+      'player-hair-right',
+      this._avatarHeadPivot,
+      { width: 0.08, height: 0.34, depth: 0.66 },
+      hair,
+      new BABYLON.Vector3(0.34, 0.34, 0),
+    );
+    this._avatarHairBack = makePart(
+      'player-hair-back',
+      this._avatarHeadPivot,
+      { width: 0.66, height: 0.38, depth: 0.08 },
+      hair,
+      new BABYLON.Vector3(0, 0.34, -0.34),
+    );
+    this._avatarLeftEye = makePart(
+      'player-left-eye',
+      this._avatarHeadPivot,
+      { width: 0.08, height: 0.07, depth: 0.014 },
+      eye,
+      new BABYLON.Vector3(-0.12, 0.34, 0.318),
+    );
+    this._avatarRightEye = makePart(
+      'player-right-eye',
+      this._avatarHeadPivot,
+      { width: 0.08, height: 0.07, depth: 0.014 },
+      eye,
+      new BABYLON.Vector3(0.12, 0.34, 0.318),
+    );
+    this._avatarNose = makePart(
+      'player-nose',
+      this._avatarHeadPivot,
+      { width: 0.06, height: 0.1, depth: 0.018 },
+      skinShade,
+      new BABYLON.Vector3(0, 0.23, 0.322),
+    );
+    this._avatarMouth = makePart(
+      'player-mouth',
+      this._avatarHeadPivot,
+      { width: 0.16, height: 0.035, depth: 0.014 },
+      eye,
+      new BABYLON.Vector3(0, 0.08, 0.318),
+    );
+
+    this._avatarLeftArmPivot = makePivot('player-left-arm-pivot', this._avatarRoot, new BABYLON.Vector3(-0.48, 1.46, 0));
+    this._avatarRightArmPivot = makePivot('player-right-arm-pivot', this._avatarRoot, new BABYLON.Vector3(0.48, 1.46, 0));
+    this._avatarLeftSleeve = makePart(
+      'player-left-sleeve',
+      this._avatarLeftArmPivot,
+      { width: 0.24, height: 0.32, depth: 0.24 },
+      shirt,
+      new BABYLON.Vector3(0, -0.16, 0),
+    );
+    this._avatarRightSleeve = makePart(
+      'player-right-sleeve',
+      this._avatarRightArmPivot,
+      { width: 0.24, height: 0.32, depth: 0.24 },
+      shirt,
+      new BABYLON.Vector3(0, -0.16, 0),
     );
     this._avatarLeftArm = makePart(
       'player-left-arm',
-      { width: 0.22, height: 0.78, depth: 0.22 },
+      this._avatarLeftArmPivot,
+      { width: 0.22, height: 0.38, depth: 0.22 },
       skin,
-      new BABYLON.Vector3(-0.48, 1.12, 0),
+      new BABYLON.Vector3(0, -0.51, 0),
     );
     this._avatarRightArm = makePart(
       'player-right-arm',
-      { width: 0.22, height: 0.78, depth: 0.22 },
+      this._avatarRightArmPivot,
+      { width: 0.22, height: 0.38, depth: 0.22 },
       skin,
-      new BABYLON.Vector3(0.48, 1.12, 0),
+      new BABYLON.Vector3(0, -0.51, 0),
     );
+    this._avatarLeftCuff = makePart(
+      'player-left-cuff',
+      this._avatarLeftArmPivot,
+      { width: 0.24, height: 0.08, depth: 0.24 },
+      jacket,
+      new BABYLON.Vector3(0, -0.32, 0),
+    );
+    this._avatarRightCuff = makePart(
+      'player-right-cuff',
+      this._avatarRightArmPivot,
+      { width: 0.24, height: 0.08, depth: 0.24 },
+      jacket,
+      new BABYLON.Vector3(0, -0.32, 0),
+    );
+
+    this._avatarLeftLegPivot = makePivot('player-left-leg-pivot', this._avatarRoot, new BABYLON.Vector3(-0.16, 0.82, 0));
+    this._avatarRightLegPivot = makePivot('player-right-leg-pivot', this._avatarRoot, new BABYLON.Vector3(0.16, 0.82, 0));
     this._avatarLeftLeg = makePart(
       'player-left-leg',
-      { width: 0.26, height: 0.8, depth: 0.26 },
+      this._avatarLeftLegPivot,
+      { width: 0.26, height: 0.62, depth: 0.26 },
       pants,
-      new BABYLON.Vector3(-0.16, 0.4, 0),
+      new BABYLON.Vector3(0, -0.31, 0),
     );
     this._avatarRightLeg = makePart(
       'player-right-leg',
-      { width: 0.26, height: 0.8, depth: 0.26 },
+      this._avatarRightLegPivot,
+      { width: 0.26, height: 0.62, depth: 0.26 },
       pants,
-      new BABYLON.Vector3(0.16, 0.4, 0),
+      new BABYLON.Vector3(0, -0.31, 0),
     );
     this._avatarLeftBoot = makePart(
       'player-left-boot',
-      { width: 0.28, height: 0.16, depth: 0.3 },
+      this._avatarLeftLegPivot,
+      { width: 0.28, height: 0.22, depth: 0.32 },
       boots,
-      new BABYLON.Vector3(-0.16, 0.02, 0),
+      new BABYLON.Vector3(0, -0.73, 0.02),
     );
     this._avatarRightBoot = makePart(
       'player-right-boot',
-      { width: 0.28, height: 0.16, depth: 0.3 },
+      this._avatarRightLegPivot,
+      { width: 0.28, height: 0.22, depth: 0.32 },
       boots,
-      new BABYLON.Vector3(0.16, 0.02, 0),
+      new BABYLON.Vector3(0, -0.73, 0.02),
     );
   }
 
@@ -694,86 +902,151 @@ export class PlayerController {
     this._viewModelRoot.position.set(FIRST_PERSON_HAND_REST_X, FIRST_PERSON_HAND_REST_Y, FIRST_PERSON_HAND_REST_Z);
 
     const skin = makeMaterial('player-viewmodel-skin', new BABYLON.Color3(0.96, 0.82, 0.69));
-    const armHeight = 0.84;
+    const shirt = makeMaterial('player-viewmodel-shirt', new BABYLON.Color3(0.18, 0.58, 0.82));
+    const cuff = makeMaterial('player-viewmodel-cuff', new BABYLON.Color3(0.08, 0.28, 0.38));
+    const armHeight = 0.58;
+    const sleeveHeight = 0.28;
     const handHeight = 0.2;
 
     this._viewRightArmPivot = new BABYLON.TransformNode('player-view-right-arm-pivot', this.scene);
     this._viewRightArmPivot.parent = this._viewModelRoot;
     this._viewRightArmPivot.position.set(0, 0, 0);
 
+    this._viewRightSleeve = makePart(
+      'player-view-right-sleeve',
+      this._viewRightArmPivot,
+      { width: 0.28, height: sleeveHeight, depth: 0.28 },
+      shirt,
+      new BABYLON.Vector3(0, -sleeveHeight * 0.5, 0),
+    );
+    this._viewRightCuff = makePart(
+      'player-view-right-cuff',
+      this._viewRightArmPivot,
+      { width: 0.29, height: 0.08, depth: 0.29 },
+      cuff,
+      new BABYLON.Vector3(0, -sleeveHeight - 0.04, 0),
+    );
     this._viewRightArm = makePart(
       'player-view-right-arm',
       this._viewRightArmPivot,
       { width: 0.26, height: armHeight, depth: 0.26 },
       skin,
-      new BABYLON.Vector3(0, -armHeight * 0.5, 0),
+      new BABYLON.Vector3(0, -(sleeveHeight + 0.08 + armHeight * 0.5), 0),
     );
     this._viewRightHand = makePart(
       'player-view-right-hand',
       this._viewRightArmPivot,
       { width: 0.24, height: handHeight, depth: 0.24 },
       skin,
-      new BABYLON.Vector3(0, -(armHeight + handHeight * 0.5) + 0.02, 0),
+      new BABYLON.Vector3(0, -(sleeveHeight + 0.08 + armHeight + handHeight * 0.5) + 0.02, 0),
     );
   }
 
-  _updateAvatarPose(deltaSeconds, horizontalDistance) {
+  _updateAvatarPose(deltaSeconds, horizontalDistance, inputState = null) {
     if (!this._avatarRoot) return;
 
     const moving = this._grounded && horizontalDistance > FOOTSTEP_MIN_DISTANCE;
+    const sprinting = Boolean(inputState?.sprint && moving && !this._isCrouching);
     if (moving) {
-      this._walkCycle += Math.max(0, horizontalDistance * 6.5);
+      const strideSpeed = this._isCrouching ? 4.6 : sprinting ? 9.4 : 6.5;
+      this._walkCycle += Math.max(0, horizontalDistance * strideSpeed);
     }
 
-    const swingTarget = moving ? Math.sin(this._walkCycle) * 0.7 : 0;
     const poseLerp = Math.min(1, Math.max(0, deltaSeconds * 12));
+    this._runVisual += ((sprinting ? 1 : 0) - this._runVisual) * poseLerp;
+    this._jumpVisual += ((!this._grounded ? 1 : 0) - this._jumpVisual) * poseLerp;
+
+    const walkWave = moving ? Math.sin(this._walkCycle) : 0;
+    const strideAmplitude = (0.58 + this._runVisual * 0.38) * (1 - this._crouchVisual * 0.45);
+    const swingTarget = walkWave * strideAmplitude;
     this._limbSwing += (swingTarget - this._limbSwing) * poseLerp;
     const crouchTarget = this._isCrouching ? 1 : 0;
     this._crouchVisual += (crouchTarget - this._crouchVisual) * poseLerp;
     const actionCurve = this._getActionSwingCurve();
+    const mineSwing = this._activeActionType === 'mine' ? actionCurve : 0;
+    const placeSwing = this._activeActionType === 'place' ? actionCurve : 0;
 
     const crouchDrop = this._crouchVisual * 0.28;
-    const armLift = this._crouchVisual * 0.18;
-    const legShift = this._crouchVisual * 0.06;
+    const crouchLean = this._crouchVisual * 0.18;
+    const runLean = this._runVisual * 0.12;
+    const jumpTuck = this._jumpVisual * (this._velocity.y > 0 ? 0.32 : 0.18);
+    const bodyBob = moving ? Math.abs(Math.cos(this._walkCycle * 2)) * (0.018 + this._runVisual * 0.014) : 0;
+    const cameraPitch = this._cameraMount?.rotation?.x ?? 0;
 
-    this._avatarBody.position.y = 1.12 - crouchDrop;
-    this._avatarHead.position.y = 1.74 - crouchDrop * 0.92;
-    this._avatarHair.position.y = 2.0 - crouchDrop * 0.92;
-    this._avatarLeftArm.position.y = 1.12 - crouchDrop * 0.85;
-    this._avatarRightArm.position.y = 1.12 - crouchDrop * 0.85;
-    this._avatarLeftLeg.position.y = 0.4 - legShift;
-    this._avatarRightLeg.position.y = 0.4 - legShift;
-    this._avatarLeftBoot.position.y = 0.02 - legShift;
-    this._avatarRightBoot.position.y = 0.02 - legShift;
+    this._avatarBody.position.set(0, 1.12 - crouchDrop + bodyBob, this._crouchVisual * 0.04);
+    this._avatarBody.rotation.set(-(crouchLean + runLean), 0, this._runVisual * walkWave * 0.025);
 
-    this._avatarHead.rotation.x = this._cameraMount.rotation.x * 0.35;
-    this._avatarLeftArm.rotation.x = this._limbSwing - armLift;
-    this._avatarRightArm.rotation.x = -this._limbSwing - armLift - actionCurve * 1.2;
-    this._avatarRightArm.rotation.z = actionCurve * 0.18;
-    this._avatarLeftArm.rotation.z = 0;
-    this._avatarLeftLeg.rotation.x = -this._limbSwing;
-    this._avatarRightLeg.rotation.x = this._limbSwing;
+    if (this._avatarHeadPivot) {
+      this._avatarHeadPivot.position.set(0, 1.44 - crouchDrop * 0.92 + bodyBob, this._crouchVisual * 0.06);
+      this._avatarHeadPivot.rotation.set(
+        cameraPitch * 0.35 + this._crouchVisual * 0.08 - this._runVisual * 0.04,
+        this._runVisual * walkWave * 0.035,
+        -this._runVisual * walkWave * 0.025,
+      );
+    }
+
+    if (this._avatarLeftArmPivot && this._avatarRightArmPivot) {
+      this._avatarLeftArmPivot.position.set(-0.49, 1.46 - crouchDrop * 0.82 + bodyBob, this._crouchVisual * 0.04);
+      this._avatarRightArmPivot.position.set(0.49, 1.46 - crouchDrop * 0.82 + bodyBob, this._crouchVisual * 0.04);
+
+      const leftArmX = this._limbSwing * 0.95 - this._crouchVisual * 0.16 - this._jumpVisual * 0.18;
+      const rightArmX = -this._limbSwing * 0.95
+        - this._crouchVisual * 0.16
+        - this._jumpVisual * 0.18
+        - mineSwing * 1.45
+        - placeSwing * 0.48;
+
+      this._avatarLeftArmPivot.rotation.set(
+        leftArmX,
+        -0.04 + this._runVisual * 0.04,
+        0.08 + this._crouchVisual * 0.08 + this._runVisual * 0.05,
+      );
+      this._avatarRightArmPivot.rotation.set(
+        rightArmX,
+        0.04 + mineSwing * 0.18 - placeSwing * 0.32,
+        -0.08 - this._crouchVisual * 0.08 - this._runVisual * 0.05 + mineSwing * 0.2 - placeSwing * 0.12,
+      );
+    }
+
+    if (this._avatarLeftLegPivot && this._avatarRightLegPivot) {
+      this._avatarLeftLegPivot.position.set(-0.16, 0.82 - crouchDrop * 0.28, this._crouchVisual * 0.04);
+      this._avatarRightLegPivot.position.set(0.16, 0.82 - crouchDrop * 0.28, this._crouchVisual * 0.04);
+      this._avatarLeftLegPivot.rotation.set(
+        -this._limbSwing * 0.95 + this._crouchVisual * 0.38 + jumpTuck,
+        0,
+        this._crouchVisual * 0.04,
+      );
+      this._avatarRightLegPivot.rotation.set(
+        this._limbSwing * 0.95 + this._crouchVisual * 0.38 + jumpTuck * 0.8,
+        0,
+        -this._crouchVisual * 0.04,
+      );
+    }
   }
 
-  _updateFirstPersonHands(deltaSeconds, horizontalDistance) {
+  _updateFirstPersonHands(deltaSeconds, horizontalDistance, inputState = null) {
     if (!this._viewModelRoot || !this._viewRightArmPivot) return;
 
     const moving = this._grounded && horizontalDistance > FOOTSTEP_MIN_DISTANCE;
+    const sprinting = Boolean(inputState?.sprint && moving && !this._isCrouching);
     const walkWave = moving ? Math.sin(this._walkCycle) : 0;
     const bobWave = moving ? Math.cos(this._walkCycle * 2) : 0;
     const actionCurve = this._getActionSwingCurve();
+    const mineSwing = this._activeActionType === 'mine' ? actionCurve : 0;
+    const placeSwing = this._activeActionType === 'place' ? actionCurve : 0;
     const poseLerp = Math.min(1, Math.max(0, deltaSeconds * 12));
     const crouchOffset = this._crouchVisual * 0.08;
-    const actionPull = actionCurve * 0.11;
-    const actionLift = actionCurve * 0.04;
+    const runOffset = sprinting ? 0.035 : 0;
+    const actionPull = mineSwing * 0.12 + placeSwing * 0.04;
+    const actionLift = mineSwing * 0.04 - placeSwing * 0.035;
 
-    this._viewModelRoot.position.x += (((FIRST_PERSON_HAND_REST_X + walkWave * FIRST_PERSON_HAND_BOB_X - actionPull) - this._viewModelRoot.position.x) * poseLerp);
+    this._viewModelRoot.position.x += (((FIRST_PERSON_HAND_REST_X + walkWave * FIRST_PERSON_HAND_BOB_X - actionPull + runOffset) - this._viewModelRoot.position.x) * poseLerp);
     this._viewModelRoot.position.y += (((FIRST_PERSON_HAND_REST_Y + bobWave * FIRST_PERSON_HAND_BOB_Y - crouchOffset + actionLift) - this._viewModelRoot.position.y) * poseLerp);
-    this._viewModelRoot.position.z += (((FIRST_PERSON_HAND_REST_Z + Math.abs(walkWave) * FIRST_PERSON_HAND_BOB_Z - actionCurve * 0.06) - this._viewModelRoot.position.z) * poseLerp);
+    this._viewModelRoot.position.z += (((FIRST_PERSON_HAND_REST_Z + Math.abs(walkWave) * FIRST_PERSON_HAND_BOB_Z - mineSwing * 0.07 + placeSwing * 0.04) - this._viewModelRoot.position.z) * poseLerp);
 
-    this._viewRightArmPivot.rotation.x = -1.36 + walkWave * 0.08 - actionCurve * 0.92;
-    this._viewRightArmPivot.rotation.y = 0.08 - actionCurve * 0.12;
-    this._viewRightArmPivot.rotation.z = -0.46 - walkWave * 0.03 - actionCurve * 0.22;
+    this._viewRightArmPivot.rotation.x = -1.36 + walkWave * 0.08 - mineSwing * 0.96 - placeSwing * 0.32;
+    this._viewRightArmPivot.rotation.y = 0.08 - mineSwing * 0.12 - placeSwing * 0.36;
+    this._viewRightArmPivot.rotation.z = -0.46 - walkWave * 0.03 - mineSwing * 0.24 + placeSwing * 0.1;
   }
 
   getInteractionOrigin() {

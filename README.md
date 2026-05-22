@@ -1,4 +1,4 @@
-# BubbleCraft
+# 🎮 BubbleCraft
 This project is aiming to make a light-weight, instant playable, online, Minecraft-like sandbox game.
 
 The current in-browser implementation now uses Babylon.js for rendering and chunk meshing. The legacy Three.js pipeline has been removed in favor of Babylon-native systems. Core systems—engine bootstrap, input, player controller, voxel generation—have been rebuilt around Babylon APIs to better support future gameplay work.
